@@ -9,8 +9,9 @@
 
 stdenvNoCC.mkDerivation {
   pname = "gemini-dikte";
-  version = "2";
+  version = "3";
 
+  src = ../gemini-dikte;
   dontUnpack = true;
   dontConfigure = true;
   dontBuild = true;
@@ -23,11 +24,10 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 ${../gemini-dikte} "$out/bin/gemini-dikte"
+    install -Dm755 "$src" "$out/bin/gemini-dikte"
     patchShebangs "$out/bin/gemini-dikte"
 
-    # Keep app-specific helpers private to the wrapped program instead of
-    # adding them to the user's global PATH.
+    # Keep app-only helpers out of the normal system PATH.
     wrapProgram "$out/bin/gemini-dikte" \
       --prefix PATH : ${lib.makeBinPath [ wl-clipboard libnotify ]}
 
@@ -44,16 +44,12 @@ stdenvNoCC.mkDerivation {
     set -eu
 
     SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-
-    # Best effort: stop/remove an active recording before deleting user state.
     "$SCRIPT_DIR/gemini-dikte" cancel >/dev/null 2>&1 || true
 
     rm -rf "''${XDG_CONFIG_HOME:-$HOME/.config}/gemini-dikte"
-    rm -rf "''${XDG_STATE_HOME:-$HOME/.local/state}/gemini-dikte"
-    rm -f "''${XDG_STATE_HOME:-$HOME/.local/state}/gemini-dikte.log"
     rm -rf "''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/gemini-dikte"
 
-    printf '%s\n' "[OK] Gemini Dictation user config/state removed."
+    printf '%s\n' "[OK] Gemini Dictation config/runtime removed."
     EOF
     chmod 0755 "$out/bin/gemini-dikte-purge"
     patchShebangs "$out/bin/gemini-dikte-purge"
@@ -62,7 +58,7 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "Minimal KDE/Wayland dictation using the Gemini REST API";
+    description = "Minimal NixOS KDE/Wayland dictation using the Gemini REST API";
     mainProgram = "gemini-dikte";
     platforms = lib.platforms.linux;
   };
