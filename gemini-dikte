@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""Minimal KDE/Wayland dictation using PipeWire + Gemini REST API.
+
+No daemon, venv, Python package, WebSocket, or local speech model is required.
+"""
+
+from __future__ import annotations
+
+import base64
+import fcntl
+import getpass
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+APP = "gemini-dikte"
+HOME = Path.home()
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / APP
+CONFIG_FILE = CONFIG_DIR / "config.json"
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state"))
+LOG_FILE = STATE_DIR / f"{APP}.log"
+RUNTIME_BASE = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/{APP}-{os.getuid()}"))
+RUNTIME_DIR = RUNTIME_BASE / APP
+STATE_FILE = RUNTIME_DIR / "recording.json"
+LOCK_FILE = RUNTIME_DIR / "command.lock"
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "api_key": "",
+    "model": "gemini-3.5-flash-lite",
+    "language": "tr-TR",
+    "auto_paste": True,
+    "notifications": True,
+    "prompt": (
+        "Accurately transcribe the speech from this audio recording. "
+        "Correct punctuation and capitalization. Do not alter the meaning, "
+        "summarize, or add explanations. Remove filler sounds only if they "
+        "do not change the meaning. Return only the final text to be pasted."
+    ),
+}
+
+
+def ensure_dirs() -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        RUNTIME_DIR.chmod(0o700)
+    except OSError:
+        pass
+
+
+def log(message: str) -> None:
+    ensure_dirs()
+    stamp = datetime.now().isoformat(timespec="seconds")
+    with LOG_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{stamp}] {message}\n")
+
+
+def notify(title: str, message: str, urgency: str = "normal") -> None:
+    config = load_config(required=False)
+    if not config.get("notifications", True):
+        return
+    if shutil.which("notify-send"):
+        subprocess.run(
+            ["notify-send", "-a", "Gemini Dictation", "-u", urgency, title, message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
+def fail(message: str, code: int = 1) -> None:
+    log(f"ERROR: {message}")
+    notify("Gemini Dictation — Error", message, "critical")
+    print(f"[ERROR] {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_config(required: bool = True) -> dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        if required:
+            fail("Configuration file missing. Run 'gemini-dikte setup' first.")
+        return DEFAULT_CONFIG.copy()
+    try:
+        loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if required:
+            fail(f"Could not read config file: {exc}")
+        return DEFAULT_CONFIG.copy()
+    config = DEFAULT_CONFIG.copy()
+    config.update(loaded)
+    return config
+
+
+def save_config(config: dict[str, Any]) -> None:
+    ensure_dirs()
+    CONFIG_FILE.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    CONFIG_FILE.chmod(0o600)
+
+
+def setup() -> None:
+    ensure_dirs()
+    current = load_config(required=False)
+    print("Gemini Dictation Setup")
+    print("API key will not be displayed on screen.")
+    key = getpass.getpass("Google AI API key: ").strip()
+    if not key:
+        key = str(current.get("api_key", "")).strip()
+    if not key:
+        fail("API key cannot be empty.")
+
+    default_model = str(current.get("model") or DEFAULT_CONFIG["model"])
+    model = input(f"Model [{default_model}]: ").strip() or default_model
+    default_language = str(current.get("language") or "tr-TR")
+    language = input(f"Language [{default_language}]: ").strip() or default_language
+
+    current.update({"api_key": key, "model": model, "language": language})
+    save_config(current)
+    print(f"[OK] Settings saved: {CONFIG_FILE}")
+    print("KDE shortcut command: gemini-dikte toggle")
+
+
+def read_state() -> dict[str, Any] | None:
+    if not STATE_FILE.exists():
+        return None
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        STATE_FILE.unlink(missing_ok=True)
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def write_state(pid: int, audio_path: Path) -> None:
+    state = {
+        "pid": pid,
+        "audio_path": str(audio_path),
+        "started_at": time.time(),
+    }
+    STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+    STATE_FILE.chmod(0o600)
+
+
+def start_recording() -> None:
+    load_config()
+    existing = read_state()
+    if existing:
+        pid = int(existing.get("pid", 0))
+        if pid and pid_alive(pid):
+            fail("Recording is already in progress.")
+        STATE_FILE.unlink(missing_ok=True)
+
+    recorder = shutil.which("pw-record")
+    if not recorder:
+        fail("pw-record not found. Install PipeWire tools.")
+
+    audio_path = RUNTIME_DIR / f"recording-{int(time.time() * 1000)}.wav"
+    err_path = RUNTIME_DIR / "pw-record.log"
+    err_handle = err_path.open("ab")
+    try:
+        process = subprocess.Popen(
+            [
+                recorder,
+                "--rate=16000",
+                "--channels=1",
+                "--format=s16",
+                str(audio_path),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=err_handle,
+            start_new_session=True,
+        )
+    finally:
+        err_handle.close()
+
+    time.sleep(0.25)
+    if process.poll() is not None:
+        details = err_path.read_text(errors="replace")[-500:] if err_path.exists() else ""
+        fail(f"Could not start audio recording. {details.strip()}")
+
+    write_state(process.pid, audio_path)
+    log(f"Recording started pid={process.pid} file={audio_path}")
+    notify("Gemini Dictation", "Recording started")
+    print("[OK] Recording started")
+
+
+def terminate_recorder(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        try:
+            os.kill(pid, signal.SIGINT)
+        except ProcessLookupError:
+            return
+
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return
+        time.sleep(0.1)
+
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def extract_text(response: dict[str, Any]) -> str:
+    try:
+        candidates = response["candidates"]
+        parts = candidates[0]["content"]["parts"]
+        text = "".join(str(part.get("text", "")) for part in parts).strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"No text found in Gemini response: {response}") from exc
+
+    if text.startswith("```") and text.endswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    return text
+
+
+def transcribe(audio_path: Path, config: dict[str, Any]) -> str:
+    try:
+        audio = audio_path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"Could not read audio file: {exc}") from exc
+
+    if len(audio) < 1000:
+        raise RuntimeError("Audio recording is empty or too short.")
+    if len(audio) > 18 * 1024 * 1024:
+        raise RuntimeError("Recording exceeds 18 MB limit; make a shorter recording.")
+
+    model = urllib.parse.quote(str(config["model"]), safe="-._")
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
+    prompt = (
+        f"Spoken language: {config.get('language', 'tr-TR')}.\n"
+        f"{config.get('prompt', DEFAULT_CONFIG['prompt'])}"
+    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": "audio/wav",
+                            "data": base64.b64encode(audio).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 8192,
+        },
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": str(config["api_key"]),
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=75) as result:
+            response = json.loads(result.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(body).get("error", {}).get("message", body)
+        except json.JSONDecodeError:
+            detail = body
+        raise RuntimeError(f"Gemini HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Gemini connection error: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("Gemini request timed out.") from exc
+
+    return extract_text(response)
+
+
+def copy_and_paste(text: str, auto_paste: bool) -> str:
+    if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy"):
+        subprocess.run(["wl-copy"], input=text, text=True, check=True)
+        if auto_paste and shutil.which("ydotool"):
+            time.sleep(0.15)
+            result = subprocess.run(
+                ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                return "pasted"
+        return "copied"
+
+    if os.environ.get("DISPLAY") and shutil.which("xclip"):
+        subprocess.run(
+            ["xclip", "-selection", "clipboard"],
+            input=text,
+            text=True,
+            check=True,
+        )
+        if auto_paste and shutil.which("xdotool"):
+            time.sleep(0.15)
+            result = subprocess.run(
+                ["xdotool", "key", "--clearmodifiers", "ctrl+v"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                return "pasted"
+        return "copied"
+
+    raise RuntimeError("No clipboard tool found: install wl-copy for Wayland.")
+
+
+def stop_recording(cancel: bool = False) -> None:
+    state = read_state()
+    if not state:
+        fail("No active recording.")
+
+    pid = int(state.get("pid", 0))
+    audio_path = Path(str(state.get("audio_path", "")))
+    terminate_recorder(pid)
+    STATE_FILE.unlink(missing_ok=True)
+    time.sleep(0.2)
+
+    if cancel:
+        audio_path.unlink(missing_ok=True)
+        notify("Gemini Dictation", "Recording cancelled")
+        print("[OK] Recording cancelled")
+        return
+
+    notify("Gemini Dictation", "Transcribing…")
+    print("[INFO] Transcribing…")
+    config = load_config()
+    try:
+        text = transcribe(audio_path, config)
+        if not text:
+            raise RuntimeError("Gemini returned empty text.")
+        action = copy_and_paste(text, bool(config.get("auto_paste", True)))
+        log(f"Transcription success chars={len(text)} action={action}")
+        if action == "pasted":
+            notify("Gemini Dictation", "Text pasted")
+        else:
+            notify("Gemini Dictation", "Text copied to clipboard")
+        print(text)
+    finally:
+        audio_path.unlink(missing_ok=True)
+
+
+def status() -> None:
+    state = read_state()
+    if not state:
+        print("idle")
+        return
+    pid = int(state.get("pid", 0))
+    if pid and pid_alive(pid):
+        print("recording")
+    else:
+        STATE_FILE.unlink(missing_ok=True)
+        print("idle")
+
+
+def doctor() -> None:
+    config = load_config(required=False)
+    checks = {
+        "pw-record": bool(shutil.which("pw-record")),
+        "wl-copy": bool(shutil.which("wl-copy")),
+        "ydotool": bool(shutil.which("ydotool")),
+        "notify-send": bool(shutil.which("notify-send")),
+        "config": CONFIG_FILE.exists(),
+        "api-key": bool(config.get("api_key")),
+        "wayland": bool(os.environ.get("WAYLAND_DISPLAY")),
+    }
+    for name, ok in checks.items():
+        print(f"{'✓' if ok else '✗'} {name}")
+    if not all(checks[name] for name in ("pw-record", "wl-copy", "config", "api-key")):
+        raise SystemExit(1)
+
+
+def toggle() -> None:
+    state = read_state()
+    if state and int(state.get("pid", 0)) and pid_alive(int(state["pid"])):
+        stop_recording()
+    else:
+        if state:
+            STATE_FILE.unlink(missing_ok=True)
+        start_recording()
+
+
+def usage() -> None:
+    print(
+        "Usage: gemini-dikte "
+        "{setup|toggle|start|stop|cancel|status|doctor|config-path|log-path}"
+    )
+
+
+def main() -> None:
+    ensure_dirs()
+    command = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+
+    with LOCK_FILE.open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("Previous operation is still running; try again in a few seconds.")
+
+        if command == "setup":
+            setup()
+        elif command == "toggle":
+            toggle()
+        elif command == "start":
+            start_recording()
+        elif command == "stop":
+            stop_recording()
+        elif command == "cancel":
+            stop_recording(cancel=True)
+        elif command == "status":
+            status()
+        elif command == "doctor":
+            doctor()
+        elif command == "config-path":
+            print(CONFIG_FILE)
+        elif command == "log-path":
+            print(LOG_FILE)
+        else:
+            usage()
+            raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        fail("Operation cancelled.", 130)
+    except subprocess.CalledProcessError as exc:
+        fail(f"External command failed: {exc}")
+    except Exception as exc:  # Last-resort user-facing error + log.
+        fail(str(exc))
