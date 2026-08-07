@@ -34,18 +34,40 @@ RUNTIME_DIR = RUNTIME_BASE / APP
 STATE_FILE = RUNTIME_DIR / "recording.json"
 LOCK_FILE = RUNTIME_DIR / "command.lock"
 
+LEGACY_DEFAULT_PROMPT = (
+    "Accurately transcribe the speech from this audio recording. "
+    "Correct punctuation and capitalization. Do not alter the meaning, "
+    "summarize, or add explanations. Remove filler sounds only if they "
+    "do not change the meaning. Return only the final text to be pasted."
+)
+
+CLEAN_DICTATION_PROMPT = (
+    "You are a professional dictation transcription and cleanup engine. "
+    "Transcribe the attached audio accurately in the specified language, then "
+    "convert the spoken language into clean, natural, well-written text. "
+    "Preserve the speaker's exact meaning, intent, and tone. Correct punctuation, "
+    "capitalization, spelling, and grammar. Fix obvious speech-recognition mistakes "
+    "when the intended word is clear from context. Remove filler words, hesitation "
+    "sounds, stutters, accidental repetitions, and abandoned sentence fragments. "
+    "Turn fragmented, awkward, or inverted spoken sentences into natural written "
+    "sentences, and merge unnecessarily broken phrases when they clearly belong "
+    "together. Keep names, numbers, technical terms, commands, file paths, URLs, "
+    "product names, and abbreviations accurate. Do not summarize or shorten meaningful "
+    "information. Do not add facts, explanations, opinions, or answers. If the speaker "
+    "asks a question, transcribe the question; do not answer it. If the speaker dictates "
+    "punctuation or formatting, apply it naturally instead of writing the instruction "
+    "literally. Prefer clear and concise written language without changing the intended "
+    "meaning. Return only the final cleaned text, with no quotation marks, Markdown, "
+    "headings, or introductory text."
+)
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "api_key": "",
     "model": "gemini-3.5-flash-lite",
     "language": "tr-TR",
     "auto_paste": True,
     "notifications": True,
-    "prompt": (
-        "Accurately transcribe the speech from this audio recording. "
-        "Correct punctuation and capitalization. Do not alter the meaning, "
-        "summarize, or add explanations. Remove filler sounds only if they "
-        "do not change the meaning. Return only the final text to be pasted."
-    ),
+    "prompt": CLEAN_DICTATION_PROMPT,
 }
 
 
@@ -97,6 +119,12 @@ def load_config(required: bool = True) -> dict[str, Any]:
         if required:
             fail(f"Could not read config file: {exc}")
         return DEFAULT_CONFIG.copy()
+
+    # Automatically move installations that still use the old built-in prompt
+    # to the improved clean-dictation prompt, while preserving custom prompts.
+    if loaded.get("prompt") == LEGACY_DEFAULT_PROMPT:
+        loaded["prompt"] = CLEAN_DICTATION_PROMPT
+
     config = DEFAULT_CONFIG.copy()
     config.update(loaded)
     return config
@@ -262,16 +290,23 @@ def transcribe(audio_path: Path, config: dict[str, Any]) -> str:
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent"
     )
-    prompt = (
-        f"Spoken language: {config.get('language', 'tr-TR')}.\n"
-        f"{config.get('prompt', DEFAULT_CONFIG['prompt'])}"
-    )
+    system_prompt = str(config.get("prompt", DEFAULT_CONFIG["prompt"]))
     payload = {
+        "system_instruction": {
+            "parts": [
+                {"text": system_prompt},
+            ]
+        },
         "contents": [
             {
                 "role": "user",
                 "parts": [
-                    {"text": prompt},
+                    {
+                        "text": (
+                            f"Spoken language: {config.get('language', 'tr-TR')}. "
+                            "Transcribe and clean up this dictation."
+                        )
+                    },
                     {
                         "inlineData": {
                             "mimeType": "audio/wav",
@@ -282,7 +317,6 @@ def transcribe(audio_path: Path, config: dict[str, Any]) -> str:
             }
         ],
         "generationConfig": {
-            "temperature": 0.0,
             "maxOutputTokens": 8192,
         },
     }
