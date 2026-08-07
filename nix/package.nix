@@ -11,20 +11,19 @@ stdenvNoCC.mkDerivation {
   pname = "gemini-dikte";
   version = "2";
 
-  src = ../.;
+  dontUnpack = true;
+  dontConfigure = true;
+  dontBuild = true;
 
   nativeBuildInputs = [
     makeWrapper
     python3
   ];
 
-  dontConfigure = true;
-  dontBuild = true;
-
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 gemini-dikte "$out/bin/gemini-dikte"
+    install -Dm755 ${../gemini-dikte} "$out/bin/gemini-dikte"
     patchShebangs "$out/bin/gemini-dikte"
 
     # Keep app-specific helpers private to the wrapped program instead of
