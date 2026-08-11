@@ -25,6 +25,7 @@ let
       meson
       ninja
       pkg-config
+      qt6.wrapQtAppsHook
     ];
 
     buildInputs = [
