@@ -31,9 +31,7 @@ programs.gemini-dikte.enable = true;
 
 The module installs Gemini Dictation and expects PipeWire to already be enabled.
 
-The application privately packages [KWtype](https://github.com/Sporif/KWtype) for direct keyboard input through KWin and `notify-send` for desktop notifications. It does not run in the background.
-
-For compatibility, the old `programs.gemini-dikte.user` option is still accepted but is no longer used or required. No `ydotoold` service or extra input group membership is needed.
+The application privately packages [KWtype](https://github.com/Sporif/KWtype) for direct keyboard input through KWin and `notify-send` for desktop notifications. It does not run in the background and does not require `ydotoold` or extra input-group membership.
 
 ## Setup
 
