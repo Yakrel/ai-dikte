@@ -1,15 +1,51 @@
 {
   lib,
+  stdenv,
   stdenvNoCC,
   makeWrapper,
   python3,
-  wl-clipboard,
+  meson,
+  ninja,
+  pkg-config,
+  qt6,
+  kdePackages,
+  wayland,
+  libxkbcommon,
   libnotify,
+  kwtypeSrc,
 }:
 
+let
+  kwtype = stdenv.mkDerivation {
+    pname = "kwtype";
+    version = "0.1.0-unstable-2026-04-14";
+    src = kwtypeSrc;
+
+    nativeBuildInputs = [
+      meson
+      ninja
+      pkg-config
+    ];
+
+    buildInputs = [
+      qt6.qtbase
+      kdePackages.kwayland
+      wayland
+      libxkbcommon
+    ];
+
+    meta = {
+      description = "Virtual keyboard input tool for KDE Plasma Wayland";
+      homepage = "https://github.com/Sporif/KWtype";
+      license = lib.licenses.mit;
+      mainProgram = "kwtype";
+      platforms = lib.platforms.linux;
+    };
+  };
+in
 stdenvNoCC.mkDerivation {
   pname = "gemini-dikte";
-  version = "1";
+  version = "0.2.0";
 
   src = ../gemini-dikte;
   dontUnpack = true;
@@ -28,7 +64,7 @@ stdenvNoCC.mkDerivation {
     patchShebangs "$out/bin/gemini-dikte"
 
     wrapProgram "$out/bin/gemini-dikte" \
-      --prefix PATH : ${lib.makeBinPath [ wl-clipboard libnotify ]}
+      --prefix PATH : ${lib.makeBinPath [ kwtype libnotify ]}
 
     cat > "$out/bin/gemini-dikte-toggle.sh" <<'EOF'
     #!/usr/bin/env sh
@@ -61,6 +97,8 @@ stdenvNoCC.mkDerivation {
 
   meta = {
     description = "Minimal NixOS KDE/Wayland dictation using Gemini";
+    homepage = "https://github.com/Yakrel/ai-dikte";
+    license = lib.licenses.mit;
     mainProgram = "gemini-dikte";
     platforms = lib.platforms.linux;
   };
