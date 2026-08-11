@@ -10,18 +10,18 @@ in
     enable = lib.mkEnableOption "Gemini Dictation";
 
     user = lib.mkOption {
-      type = lib.types.str;
+      type = lib.types.nullOr lib.types.str;
+      default = null;
       example = "alice";
-      description = "Login user allowed to use ydotool for automatic paste.";
+      description = ''
+        Deprecated compatibility option. It is no longer needed because
+        Gemini Dictation types through KWin instead of ydotool.
+      '';
     };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [
-      {
-        assertion = builtins.hasAttr cfg.user config.users.users;
-        message = "programs.gemini-dikte.user must name an existing NixOS user.";
-      }
       {
         assertion = config.services.pipewire.enable;
         message = "Gemini Dictation requires services.pipewire.enable = true.";
@@ -29,7 +29,5 @@ in
     ];
 
     environment.systemPackages = [ self.packages.${system}.gemini-dikte ];
-    programs.ydotool.enable = true;
-    users.users.${cfg.user}.extraGroups = [ config.programs.ydotool.group ];
   };
 }
