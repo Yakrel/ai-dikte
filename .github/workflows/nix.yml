@@ -22,7 +22,4 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
 
       - name: Check flake
-        run: |
-          nix flake lock
-          cat flake.lock
-          nix flake check --show-trace
+        run: nix flake check --show-trace --no-update-lock-file
