@@ -1,0 +1,45 @@
+{
+  "nodes": {
+    "kwtype-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776181195,
+        "narHash": "sha256-bYpW6IY77hoL6cEZAT08bGaqXAQkntzBbMOUd/ij5gk=",
+        "owner": "Sporif",
+        "repo": "KWtype",
+        "rev": "ac2c3864aaacc31afc252d88d1d4b669270f2f44",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sporif",
+        "repo": "KWtype",
+        "rev": "ac2c3864aaacc31afc252d88d1d4b669270f2f44",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1786247143,
+        "narHash": "sha256-8S3Kcxs7D4UtxJxSJZz0m14CGhuW0MxfrIwJxeGWGnQ=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "279b4a8275f032c566576b3f181fa0f27197f588",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "kwtype-src": "kwtype-src",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
