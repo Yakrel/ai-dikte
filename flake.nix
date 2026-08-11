@@ -1,9 +1,16 @@
 {
   description = "Minimal KDE/Wayland dictation using Gemini";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
+    kwtype-src = {
+      url = "github:Sporif/KWtype/ac2c3864aaacc31afc252d88d1d4b669270f2f44";
+      flake = false;
+    };
+  };
+
+  outputs = { self, nixpkgs, kwtype-src }:
     let
       systems = [
         "x86_64-linux"
@@ -17,7 +24,9 @@
           pkgs = import nixpkgs { inherit system; };
         in
         {
-          gemini-dikte = pkgs.callPackage ./nix/package.nix { };
+          gemini-dikte = pkgs.callPackage ./nix/package.nix {
+            kwtypeSrc = kwtype-src;
+          };
           default = self.packages.${system}.gemini-dikte;
         });
 
