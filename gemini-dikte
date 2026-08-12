@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal NixOS/KDE Wayland dictation using Gemini REST API."""
+"""Minimal CachyOS/KDE Wayland dictation using Gemini REST API."""
 
 from __future__ import annotations
 
