@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Gemini Dictation
+Comment=Toggle Gemini voice dictation
+Exec=/usr/bin/gemini-dikte-toggle
+TryExec=/usr/bin/gemini-dikte-toggle
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+X-KDE-Shortcuts=Meta+Z
