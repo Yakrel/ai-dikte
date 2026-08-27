@@ -1,0 +1,49 @@
+name: Apply review fixes
+
+on:
+  push:
+    branches: [feature/omarchy-live-transcribe]
+    paths: [.github/workflows/apply-review-fixes.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: feature/omarchy-live-transcribe
+
+      - name: Install dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          git kwayland libnotify libxkbcommon pipewire-audio python python-websockets
+          qt6-base wayland wtype meson ninja pkgconf
+
+      - name: Apply and validate review fixes
+        run: |
+          git apply --check .github/review-fixes.patch
+          git apply .github/review-fixes.patch
+          python -m py_compile gemini-dikte
+          grep -Eq 'HYPR_BINDINGS_LUA.*bindings.lua' gemini-dikte
+          grep -q 'receive_transcriptions' gemini-dikte
+          ! grep -Eqi 'wl-copy|wl-paste|xclip|xsel|pyperclip' gemini-dikte
+          expected=$(sed -n "s/^  '\([0-9a-f]\{64\}\)'$/\1/p" PKGBUILD | head -1)
+          actual=$(sha256sum gemini-dikte | awk '{print $1}')
+          test "$actual" = "$expected"
+          useradd --create-home builder
+          chown -R builder:builder .
+          runuser -u builder -- makepkg --noconfirm --cleanbuild
+
+      - name: Commit fixes and remove temporary files
+        run: |
+          rm .github/review-fixes.patch .github/workflows/apply-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Omarchy 4 bindings and Live receive loop"
+          git push origin HEAD:feature/omarchy-live-transcribe
