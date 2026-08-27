@@ -1,7 +1,7 @@
 pkgname=gemini-dikte
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
-pkgdesc='Minimal KDE Plasma Wayland dictation using Gemini'
+pkgdesc='Minimal Wayland dictation using Gemini 3.5 Transcribe Live'
 arch=('x86_64')
 url='https://github.com/Yakrel/ai-dikte'
 license=('MIT')
@@ -12,8 +12,10 @@ depends=(
   'libxkbcommon'
   'pipewire-audio'
   'python'
+  'python-websockets'
   'qt6-base'
   'wayland'
+  'wtype'
 )
 makedepends=('meson' 'ninja' 'pkgconf')
 source=(
@@ -24,7 +26,7 @@ source=(
   "kwtype-${_kwtype_commit}.tar.gz::https://github.com/Sporif/KWtype/archive/${_kwtype_commit}.tar.gz"
 )
 sha256sums=(
-  'd255c624d2c37b832b408f93dcc0854f4f15ff6919e00fe60a6449273a47c03f'
+  '6ebd4524713472ade92fe872a542840ec59b9bdff2cada9b07ce7ad462c9af14'
   '0199d872c6f3939a7bbd887e997982bdf3352a251bdec65a83071e9330bb35d0'
   '6f5d84dd85631fb3022339c5019bd3271689ad55d787a1da8c641be1bfb4f17d'
   'f8719185a1f3d2a8ec0bf8507b1476e1a0f37cd10328402661f0cd2748d855d3'
