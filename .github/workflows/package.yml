@@ -19,8 +19,8 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          kwayland libnotify libxkbcommon pipewire-audio python qt6-base wayland
-          meson ninja pkgconf
+          kwayland libnotify libxkbcommon pipewire-audio python python-websockets
+          qt6-base wayland wtype meson ninja pkgconf
 
       - name: Check Python syntax
         run: python -m py_compile gemini-dikte
