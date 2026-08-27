@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
+      - name: Install Git before checkout
+        run: pacman -Syu --noconfirm --needed git
+
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -20,8 +23,8 @@ jobs:
 
       - name: Install dependencies
         run: >-
-          pacman -Syu --noconfirm --needed
-          git kwayland libnotify libxkbcommon pipewire-audio python python-websockets
+          pacman -S --noconfirm --needed
+          kwayland libnotify libxkbcommon pipewire-audio python python-websockets
           qt6-base wayland wtype meson ninja pkgconf
 
       - name: Apply and validate review fixes
