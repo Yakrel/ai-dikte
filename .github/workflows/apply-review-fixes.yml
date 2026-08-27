@@ -44,6 +44,7 @@ jobs:
 
       - name: Commit fixes and remove temporary files
         run: |
+          chown -R root:root .
           rm .github/review-fixes.patch .github/workflows/apply-review-fixes.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
