@@ -1,0 +1,807 @@
+#!/usr/bin/env python3
+"""Minimal Wayland dictation using Gemini 3.5 Transcribe Live."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import fcntl
+import getpass
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+try:
+    import websockets
+except ImportError:  # pragma: no cover - reported by doctor/runtime checks
+    websockets = None
+
+APP = "ai-dikte"
+MODEL = "gemini-3.5-transcribe-live"
+DEFAULT_LANGUAGE = "tr-TR"
+DEFAULT_MODE = "SMART"
+AUDIO_RATE = 16000
+AUDIO_CHANNELS = 1
+AUDIO_FORMAT = "s16"
+AUDIO_CHUNK_BYTES = 3200  # 100 ms: 1600 frames * 2 bytes
+WS_ENDPOINT = (
+    "wss://generativelanguage.googleapis.com/ws/"
+    "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+)
+
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+CONFIG_FILE = CONFIG_DIR / "config.json"
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/{APP}-{os.getuid()}")) / APP
+PID_FILE = RUNTIME_DIR / "session.pid"
+READY_FILE = RUNTIME_DIR / "session.ready"
+STOP_FILE = RUNTIME_DIR / "session.stop"
+ERROR_FILE = RUNTIME_DIR / "pw-record.stderr"
+SESSION_LOG = RUNTIME_DIR / "session.log"
+LOCK_FILE = RUNTIME_DIR / "command.lock"
+
+HYPR_CONFIG_DIR = Path.home() / ".config" / "hypr"
+HYPR_BINDINGS_LUA = HYPR_CONFIG_DIR / "bindings.lua"
+HYPR_BINDINGS_CONF = HYPR_CONFIG_DIR / "bindings.conf"
+HYPR_HYPRLAND_CONF = HYPR_CONFIG_DIR / "hyprland.conf"
+HYPRLAND_LUA = HYPR_CONFIG_DIR / "hyprland.lua"
+HYPR_MARKER_START_LUA = "-- >>> ai-dikte >>>"
+HYPR_MARKER_END_LUA = "-- <<< ai-dikte <<<"
+HYPR_MARKER_START_CONF = "# >>> ai-dikte >>>"
+HYPR_MARKER_END_CONF = "# <<< ai-dikte <<<"
+HYPR_BINDING_LUA = 'o.bind("SUPER + Z", "AI Dikte", "/usr/bin/ai-dikte-toggle")'
+HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/ai-dikte-toggle"
+
+
+def ensure_runtime() -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    RUNTIME_DIR.chmod(0o700)
+
+
+def notify(title: str, message: str, urgency: str = "normal") -> None:
+    if not shutil.which("notify-send"):
+        return
+    subprocess.run(
+        ["notify-send", "-a", "AI Dikte", "-u", urgency, title, message],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def fail(message: str, code: int = 1) -> None:
+    notify("AI Dikte — Error", message, "critical")
+    print(f"[ERROR] {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_config(required: bool = True) -> dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        if required:
+            fail("Configuration missing. Run 'ai-dikte setup'.")
+        return {}
+
+    try:
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"Could not read config: {exc}")
+
+    if not isinstance(config, dict):
+        fail("Configuration is not a JSON object.")
+    return config
+
+
+def load_api_key(required: bool = True) -> str:
+    key = str(load_config(required=required).get("api_key", "")).strip()
+    if required and not key:
+        fail("API key missing. Run 'ai-dikte setup'.")
+    return key
+
+
+def config_language(config: dict[str, Any]) -> str:
+    value = str(config.get("language", DEFAULT_LANGUAGE)).strip()
+    return value or DEFAULT_LANGUAGE
+
+
+def config_mode(config: dict[str, Any]) -> str:
+    value = str(config.get("mode", DEFAULT_MODE)).strip().upper()
+    if value not in {"SMART", "VERBATIM"}:
+        raise RuntimeError("Config 'mode' must be SMART or VERBATIM.")
+    return value
+
+
+def config_vocabulary(config: dict[str, Any]) -> list[str]:
+    raw = config.get("custom_vocabulary", [])
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise RuntimeError("Config 'custom_vocabulary' must be a JSON array.")
+
+    result: list[str] = []
+    for item in raw:
+        term = str(item).strip()
+        if term and term not in result:
+            result.append(term)
+    if len(result) > 1000:
+        raise RuntimeError("Config 'custom_vocabulary' supports at most 1000 terms.")
+    return result
+
+
+def config_output_driver(config: dict[str, Any]) -> str:
+    driver = str(config.get("output_driver", "auto")).strip().lower() or "auto"
+    if driver not in {"auto", "kwtype", "wtype"}:
+        raise RuntimeError("Config 'output_driver' must be auto, kwtype, or wtype.")
+    return driver
+
+
+def setup() -> None:
+    existing = load_config(required=False)
+    old_key = str(existing.get("api_key", "")).strip()
+    key = getpass.getpass("Google AI API key (Enter keeps current): ").strip() or old_key
+    if not key:
+        fail("API key cannot be empty.")
+
+    config = dict(existing)
+    config.update(
+        {
+            "api_key": key,
+            "language": str(existing.get("language", DEFAULT_LANGUAGE)) or DEFAULT_LANGUAGE,
+            "mode": str(existing.get("mode", DEFAULT_MODE)) or DEFAULT_MODE,
+            "custom_vocabulary": existing.get("custom_vocabulary", []),
+            "output_driver": str(existing.get("output_driver", "auto")) or "auto",
+        }
+    )
+
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    CONFIG_FILE.chmod(0o600)
+    print(f"[OK] Saved: {CONFIG_FILE}")
+
+    if desktop_kind() == "hyprland":
+        install_hyprland_shortcut()
+
+
+def desktop_kind() -> str:
+    desktop = " ".join(
+        filter(
+            None,
+            [
+                os.environ.get("XDG_CURRENT_DESKTOP", ""),
+                os.environ.get("XDG_SESSION_DESKTOP", ""),
+                os.environ.get("DESKTOP_SESSION", ""),
+            ],
+        )
+    ).lower()
+
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or "hyprland" in desktop:
+        return "hyprland"
+    if os.environ.get("KDE_FULL_SESSION") or "kde" in desktop or "plasma" in desktop:
+        return "kde"
+    return "other"
+
+
+def output_candidates(config: dict[str, Any] | None = None) -> list[str]:
+    config = config or load_config(required=False)
+    forced = config_output_driver(config)
+    if forced != "auto":
+        return [forced]
+
+    desktop = desktop_kind()
+    if desktop == "hyprland":
+        return ["wtype", "kwtype"]
+    if desktop == "kde":
+        return ["kwtype", "wtype"]
+    return ["kwtype", "wtype"]
+
+
+def available_output_driver(config: dict[str, Any] | None = None) -> str | None:
+    for driver in output_candidates(config):
+        if shutil.which(driver):
+            return driver
+    return None
+
+
+def output_text(text: str) -> str:
+    # Allow time for physical modifier keys (e.g. Super/Mod4 from toggle shortcut) to release
+    time.sleep(0.06)
+    errors: list[str] = []
+    for driver in output_candidates():
+        executable = shutil.which(driver)
+        if not executable:
+            errors.append(f"{driver}: not installed")
+            continue
+
+        try:
+            result = subprocess.run(
+                [executable, "--", text],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{driver}: {exc}")
+            continue
+
+        if result.returncode == 0:
+            return driver
+
+        detail = result.stderr.strip().replace("\n", " ")[-300:]
+        errors.append(f"{driver}: {detail or f'exit {result.returncode}'}")
+
+    raise RuntimeError("Direct text injection failed. " + "; ".join(errors))
+
+
+def hyprland_shortcut_target() -> tuple[Path, str, str, str]:
+    if HYPRLAND_LUA.exists() or HYPR_BINDINGS_LUA.exists():
+        return HYPR_BINDINGS_LUA, HYPR_BINDING_LUA, HYPR_MARKER_START_LUA, HYPR_MARKER_END_LUA
+    if HYPR_BINDINGS_CONF.exists():
+        return HYPR_BINDINGS_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
+    if HYPR_HYPRLAND_CONF.exists():
+        return HYPR_HYPRLAND_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
+    return HYPR_BINDINGS_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
+
+
+def remove_managed_shortcut_block(path: Path) -> bool:
+    if not path.exists():
+        return False
+
+    text = path.read_text(encoding="utf-8")
+    modified = False
+
+    for start_marker, end_marker in (
+        (HYPR_MARKER_START_LUA, HYPR_MARKER_END_LUA),
+        (HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF),
+        ("-- >>> gemini-dikte >>>", "-- <<< gemini-dikte <<<"),
+        ("# >>> gemini-dikte >>>", "# <<< gemini-dikte <<<"),
+    ):
+        while True:
+            start = text.find(start_marker)
+            if start == -1:
+                break
+            end = text.find(end_marker, start + len(start_marker))
+            if end == -1:
+                break
+            end += len(end_marker)
+            if end < len(text) and text[end] == "\n":
+                end += 1
+            text = text[:start] + text[end:]
+            modified = True
+
+    if modified:
+        path.write_text(text, encoding="utf-8")
+        return True
+    return False
+
+
+def reload_hyprland() -> None:
+    if shutil.which("hyprctl"):
+        subprocess.run(
+            ["hyprctl", "reload"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
+def install_hyprland_shortcut() -> None:
+    target, binding, start_marker, end_marker = hyprland_shortcut_target()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    for candidate in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
+        if candidate != target:
+            remove_managed_shortcut_block(candidate)
+
+    current = target.read_text(encoding="utf-8") if target.exists() else ""
+    if (
+        start_marker not in current
+        and HYPR_MARKER_START_LUA not in current
+        and HYPR_MARKER_START_CONF not in current
+    ):
+        block = f"{start_marker}\n{binding}\n{end_marker}\n"
+        separator = "" if not current or current.endswith("\n") else "\n"
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(separator + block)
+        print(f"[OK] Installed Hyprland shortcut Meta+Z in {target}")
+    else:
+        print(f"[OK] Hyprland shortcut already installed in {target}")
+
+    reload_hyprland()
+
+
+def remove_hyprland_shortcut() -> None:
+    removed: list[Path] = []
+    for path in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
+        if remove_managed_shortcut_block(path):
+            removed.append(path)
+
+    if removed:
+        for path in removed:
+            print(f"[OK] Removed Hyprland shortcut from {path}")
+        reload_hyprland()
+    else:
+        print("[OK] No managed AI Dikte shortcut found.")
+
+
+def read_pid() -> int | None:
+    try:
+        return int(PID_FILE.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        PID_FILE.unlink(missing_ok=True)
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def session_matches(pid: int) -> bool:
+    if not pid_alive(pid):
+        return False
+
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except (OSError, PermissionError):
+        return False
+
+    args = [os.fsdecode(arg) for arg in cmdline if arg]
+    return "_live-session" in args and any(Path(arg).name in ("ai-dikte", "gemini-dikte") for arg in args)
+
+
+def clear_runtime_state() -> None:
+    PID_FILE.unlink(missing_ok=True)
+    READY_FILE.unlink(missing_ok=True)
+    STOP_FILE.unlink(missing_ok=True)
+    ERROR_FILE.unlink(missing_ok=True)
+
+
+def start_live_session() -> None:
+    load_api_key()
+    if websockets is None:
+        fail("Python websockets module is missing. Install python-websockets.")
+    if not shutil.which("pw-record"):
+        fail("pw-record is missing.")
+    if not available_output_driver():
+        fail("No supported direct typing driver found (kwtype/wtype).")
+
+    clear_runtime_state()
+    SESSION_LOG.unlink(missing_ok=True)
+    with SESSION_LOG.open("ab", buffering=0) as log_handle:
+        process = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "_live-session"],
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+
+    PID_FILE.write_text(str(process.pid), encoding="ascii")
+    PID_FILE.chmod(0o600)
+    time.sleep(0.08)
+    if process.poll() is not None:
+        details = SESSION_LOG.read_text(errors="replace")[-700:] if SESSION_LOG.exists() else ""
+        clear_runtime_state()
+        fail(f"Could not start dictation session. {details.strip()}")
+
+
+def request_stop() -> None:
+    STOP_FILE.touch(mode=0o600, exist_ok=True)
+    notify("AI Dikte", "Transcribing…")
+
+
+def toggle() -> None:
+    pid = read_pid()
+    if pid and session_matches(pid):
+        if STOP_FILE.exists():
+            notify("AI Dikte", "Previous transcription is still finishing")
+            return
+        request_stop()
+        return
+
+    clear_runtime_state()
+    start_live_session()
+
+
+async def stop_recorder(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2.0)
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=1.0)
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    await process.wait()
+
+
+def parse_server_error(message: dict[str, Any]) -> str | None:
+    error = message.get("error")
+    if isinstance(error, dict):
+        detail = str(error.get("message", "")).strip()
+        code = error.get("code")
+        if detail:
+            return f"Gemini Live API error{f' {code}' if code else ''}: {detail}"
+    return None
+
+
+async def open_live_websocket(api_key: str, config: dict[str, Any]):
+    if websockets is None:
+        raise RuntimeError("Python websockets module is missing.")
+
+    url = f"{WS_ENDPOINT}?key={quote(api_key, safe='')}"
+    try:
+        websocket = await websockets.connect(
+            url,
+            open_timeout=10,
+            close_timeout=2,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=4 * 1024 * 1024,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Could not connect to Gemini Live API: {exc}") from exc
+
+    input_transcription: dict[str, Any] = {
+        "languageCodes": [config_language(config)],
+        "mode": config_mode(config),
+    }
+    vocabulary = config_vocabulary(config)
+    if vocabulary:
+        input_transcription["customVocabulary"] = vocabulary
+
+    setup_message = {
+        "setup": {
+            "model": f"models/{MODEL}",
+            "generationConfig": {"responseModalities": ["TEXT"]},
+            "realtimeInputConfig": {
+                "automaticActivityDetection": {"disabled": True},
+            },
+            "inputAudioTranscription": input_transcription,
+        }
+    }
+    await websocket.send(json.dumps(setup_message))
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            raw = await asyncio.wait_for(websocket.recv(), timeout=max(0.1, remaining))
+        except asyncio.TimeoutError:
+            break
+        except websockets.exceptions.ConnectionClosed as exc:
+            code = getattr(exc, "code", None)
+            reason = getattr(exc, "reason", "") or str(exc)
+            if code in (1008, 4403):
+                raise RuntimeError(
+                    f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
+                ) from exc
+            raise RuntimeError(f"Gemini Live API connection closed during setup ({code}): {reason}") from exc
+
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        message = json.loads(raw)
+        error = parse_server_error(message)
+        if error:
+            await websocket.close()
+            raise RuntimeError(error)
+        if "setupComplete" in message:
+            return websocket
+
+    await websocket.close()
+    raise RuntimeError("Gemini Live API setup timed out.")
+
+
+async def send_audio(websocket, chunk: bytes) -> None:
+    message = {
+        "realtimeInput": {
+            "audio": {
+                "data": base64.b64encode(chunk).decode("ascii"),
+                "mimeType": f"audio/pcm;rate={AUDIO_RATE}",
+            }
+        }
+    }
+    await websocket.send(json.dumps(message))
+
+
+async def receive_transcriptions(
+    websocket, finals: asyncio.Queue[str], turn_complete_event: asyncio.Event
+) -> None:
+    """Drain Live API messages continuously and retain finalized transcripts only."""
+    try:
+        async for raw in websocket:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            message = json.loads(raw)
+            error = parse_server_error(message)
+            if error:
+                raise RuntimeError(error)
+
+            content = message.get("serverContent") or {}
+            final = content.get("inputTranscription") or {}
+            text = str(final.get("text", "")).strip()
+            if text:
+                await finals.put(text)
+
+            if content.get("turnComplete"):
+                turn_complete_event.set()
+    except websockets.exceptions.ConnectionClosed as exc:
+        code = getattr(exc, "code", None)
+        reason = getattr(exc, "reason", "") or str(exc)
+        if code in (1008, 4403):
+            raise RuntimeError(
+                f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
+            ) from exc
+        if code and code != 1000:
+            raise RuntimeError(f"Gemini WebSocket connection closed unexpectedly ({code}): {reason}") from exc
+
+
+async def raise_if_receiver_failed(receiver_task: asyncio.Task[None]) -> None:
+    if receiver_task.done():
+        await receiver_task
+
+
+async def collect_final_transcript(
+    finals_queue: asyncio.Queue[str],
+    receiver_task: asyncio.Task[None],
+    turn_complete_event: asyncio.Event,
+) -> str:
+    finals: list[str] = []
+    deadline = time.monotonic() + 15.0
+
+    while time.monotonic() < deadline:
+        await raise_if_receiver_failed(receiver_task)
+        if turn_complete_event.is_set() and finals_queue.empty():
+            break
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        timeout = 1.5 if finals else min(3.0, max(0.1, remaining))
+        try:
+            text = await asyncio.wait_for(finals_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            await raise_if_receiver_failed(receiver_task)
+            if turn_complete_event.is_set() or finals:
+                break
+            continue
+
+        if text and (not finals or finals[-1] != text):
+            finals.append(text)
+
+    if not finals:
+        raise RuntimeError("Gemini returned no final transcription.")
+    return " ".join(finals).strip()
+
+
+async def live_session() -> None:
+    config = load_config()
+    api_key = str(config.get("api_key", "")).strip()
+    if not api_key:
+        raise RuntimeError("API key missing. Run 'ai-dikte setup'.")
+    if websockets is None:
+        raise RuntimeError("Python websockets module is missing. Install python-websockets.")
+
+    ERROR_FILE.unlink(missing_ok=True)
+    recorder: asyncio.subprocess.Process | None = None
+    websocket = None
+    receiver_task: asyncio.Task[None] | None = None
+    finals_queue: asyncio.Queue[str] = asyncio.Queue()
+    turn_complete_event = asyncio.Event()
+
+    try:
+        with ERROR_FILE.open("wb") as error_handle:
+            recorder = await asyncio.create_subprocess_exec(
+                "pw-record",
+                "--raw",
+                f"--rate={AUDIO_RATE}",
+                f"--channels={AUDIO_CHANNELS}",
+                f"--format={AUDIO_FORMAT}",
+                "-",
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=error_handle,
+                start_new_session=True,
+            )
+
+        await asyncio.sleep(0.18)
+        if recorder.returncode is not None:
+            details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+            raise RuntimeError(f"Could not start recording. {details.strip()}")
+
+        READY_FILE.write_text("ready\n", encoding="ascii")
+        READY_FILE.chmod(0o600)
+        notify("AI Dikte", "Recording started")
+
+        connect_task = asyncio.create_task(open_live_websocket(api_key, config))
+        buffered_audio: list[bytes] = []
+
+        assert recorder.stdout is not None
+        while not connect_task.done() and not STOP_FILE.exists():
+            try:
+                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            if not chunk:
+                details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+                raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
+            buffered_audio.append(chunk)
+
+        websocket = await connect_task
+        receiver_task = asyncio.create_task(
+            receive_transcriptions(websocket, finals_queue, turn_complete_event)
+        )
+        await websocket.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
+
+        for chunk in buffered_audio:
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
+        buffered_audio.clear()
+
+        while not STOP_FILE.exists():
+            try:
+                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            if not chunk:
+                details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+                raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
+
+        await stop_recorder(recorder)
+
+        while True:
+            chunk = await recorder.stdout.read(AUDIO_CHUNK_BYTES)
+            if not chunk:
+                break
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
+
+        await websocket.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
+        text = await collect_final_transcript(finals_queue, receiver_task, turn_complete_event)
+        driver = output_text(text)
+        notify("AI Dikte", f"Text ready ({driver})")
+    finally:
+        if recorder is not None and recorder.returncode is None:
+            await stop_recorder(recorder)
+        if receiver_task is not None and not receiver_task.done():
+            receiver_task.cancel()
+            try:
+                await receiver_task
+            except asyncio.CancelledError:
+                pass
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+        if read_pid() == os.getpid():
+            clear_runtime_state()
+        else:
+            READY_FILE.unlink(missing_ok=True)
+            STOP_FILE.unlink(missing_ok=True)
+            ERROR_FILE.unlink(missing_ok=True)
+
+
+def doctor() -> None:
+    config = load_config(required=False)
+    driver = available_output_driver(config)
+    desktop = desktop_kind()
+
+    checks = {
+        "wayland": bool(os.environ.get("WAYLAND_DISPLAY")),
+        "pw-record": bool(shutil.which("pw-record")),
+        "notify-send": bool(shutil.which("notify-send")),
+        "python-websockets": websockets is not None,
+        "config": CONFIG_FILE.exists(),
+        "api-key": bool(str(config.get("api_key", "")).strip()),
+        "direct-typing": bool(driver),
+    }
+
+    for name, ok in checks.items():
+        suffix = f" ({driver})" if name == "direct-typing" and driver else ""
+        print(f"{'✓' if ok else '✗'} {name}{suffix}")
+    print(f"i desktop: {desktop}")
+    print(f"i model: {MODEL}")
+
+    if desktop == "hyprland":
+        target, _, start_marker, _ = hyprland_shortcut_target()
+        installed = False
+        if target.exists():
+            try:
+                content = target.read_text(encoding="utf-8")
+                installed = (
+                    start_marker in content
+                    or HYPR_MARKER_START_CONF in content
+                    or HYPR_MARKER_START_LUA in content
+                )
+            except OSError:
+                pass
+        print(f"{'✓' if installed else '✗'} Meta+Z Hyprland binding ({target.name})")
+
+    if not all(checks.values()):
+        raise SystemExit(1)
+
+
+def main() -> None:
+    ensure_runtime()
+    command = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+
+    if command == "_live-session":
+        try:
+            asyncio.run(live_session())
+        except Exception as exc:
+            notify("AI Dikte — Error", str(exc), "critical")
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            if read_pid() == os.getpid():
+                clear_runtime_state()
+            raise SystemExit(1)
+        return
+
+    with LOCK_FILE.open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("Previous command is still running.")
+
+        if command == "toggle":
+            toggle()
+        elif command == "setup":
+            setup()
+        elif command == "doctor":
+            doctor()
+        elif command == "shortcut-install":
+            install_hyprland_shortcut()
+        elif command == "shortcut-remove":
+            remove_hyprland_shortcut()
+        else:
+            print(
+                "Usage: ai-dikte "
+                "{toggle|setup|doctor|shortcut-install|shortcut-remove}"
+            )
+            raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        fail("Operation cancelled.", 130)
+    except subprocess.CalledProcessError as exc:
+        fail(f"External command failed: {exc}")
+    except Exception as exc:
+        fail(str(exc))
