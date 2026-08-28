@@ -1,46 +1,76 @@
 # AI Dikte
 
-Minimal Wayland dictation for Arch Linux, CachyOS, KDE Plasma, Hyprland, and Omarchy using Gemini 3.5 Transcribe Live.
+Cross-platform, minimal AI-powered dictation for **Linux** (Arch Linux, CachyOS, KDE Plasma, Hyprland, Omarchy) and **Windows** (10 / 11) using **Gemini 3.5 Transcribe Live**.
 
 Flow:
 
 ```text
-Meta+Z → speak → Meta+Z → Gemini 3.5 Transcribe Live → focused field
+Shortcut (Meta+Z / Win+Z) → speak → Shortcut → Gemini 3.5 Transcribe Live → focused field
 ```
 
-The UI stays toggle-based: press once to start recording, press again to finish, then the final transcription is typed into the focused field in one shot. Audio is streamed to Gemini while recording, but interim text is never typed on screen.
+The UI stays toggle-based: press once to start recording, press again to finish, then the final transcription is typed directly into the focused field in one shot. Audio is streamed to Gemini while recording, but interim text is never typed on screen.
 
-The clipboard is never read or modified.
+**The clipboard is never read or modified.**
 
-## Desktop support
+---
+
+## Desktop & OS Support
 
 AI Dikte automatically selects a direct text-injection backend:
 
-- KDE Plasma / KWin: `kwtype`
-- Hyprland / Omarchy: `wtype`
+- **Windows 10 / 11**: Direct Win32 `SendInput` with `KEYEVENTF_UNICODE` (supports full Unicode, Turkish characters `ç, ğ, ı, ö, ş, ü, İ, Ğ...`, and emojis with zero clipboard usage).
+- **KDE Plasma / KWin (Wayland)**: `kwtype`
+- **Hyprland / Omarchy (Wayland)**: `wtype`
 
-In `auto` mode it follows the current desktop first and can fall back to the other installed direct-typing backend if the preferred one fails. There is intentionally no clipboard fallback.
+In `auto` mode it follows the current desktop/OS and injects directly into the active window. There is intentionally no clipboard fallback.
 
-## Gemini transcription
+---
+
+## Gemini Transcription
 
 The app uses `gemini-3.5-transcribe-live` with:
 
-- Turkish language hint: `tr-TR`
+- Turkish language hint: `tr-TR` (customizable)
 - `SMART` transcription mode
 - manual activity boundaries matching the two-press toggle workflow
 - optional custom vocabulary for names and technical terms
 
 Google's Live Transcription API receives raw 16-bit PCM mono audio at 16 kHz. Only the finalized transcript is injected into the active field.
 
-## Install on Arch / CachyOS / Omarchy
+---
 
-### One-line installer (recommended, git-free)
+## Installation
+
+### Windows (10 / 11)
+
+#### One-Line PowerShell Installer (Recommended)
+
+Open PowerShell and run:
+
+```powershell
+irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
+```
+
+This installer:
+1. Installs required Python modules (`websockets`, `sounddevice`, `keyboard`, `pystray`, `pillow`).
+2. Configures silent background startup via Windows Startup (`shell:startup`).
+3. Runs interactive `setup` to configure your Google AI API key and preferred hotkey (default: `win+z` or `alt+z`).
+
+#### Standalone Executable (.exe)
+
+You can also download the pre-built `ai-dikte-windows.exe` directly from the [GitHub Releases / Actions](../../releases) page without installing Python.
+
+---
+
+### Linux (Arch / CachyOS / Omarchy / KDE)
+
+#### One-Line Installer (Recommended, Git-Free)
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.sh)"
 ```
 
-### Manual installation
+#### Manual Installation
 
 ```bash
 git clone https://github.com/Yakrel/ai-dikte.git
@@ -50,28 +80,25 @@ ai-dikte setup
 ai-dikte doctor
 ```
 
-`setup` stores the Gemini API key and, when Hyprland is detected, installs a managed `Meta+Z` binding using the active Hyprland configuration format:
+`setup` stores the Gemini API key and, when Hyprland is detected, installs a managed `Meta+Z` binding. KDE Plasma gets the same `Meta+Z` shortcut through the installed KGlobalAccel desktop entry.
 
-- Omarchy 4 / Quattro: `~/.config/hypr/bindings.lua`
-- legacy Omarchy / generic Hyprland setups: `~/.config/hypr/bindings.conf` or `~/.config/hypr/hyprland.conf`
-
-KDE Plasma gets the same `Meta+Z` shortcut through the installed KGlobalAccel desktop entry.
+---
 
 ## Configuration
 
-The persistent application file is:
+Persistent configuration file:
 
-```text
-~/.config/ai-dikte/config.json
-```
+- **Windows**: `%APPDATA%\ai-dikte\config.json` (e.g. `C:\Users\<User>\AppData\Roaming\ai-dikte\config.json`)
+- **Linux**: `~/.config/ai-dikte/config.json`
 
-It is mode `0600`. A typical configuration is:
+Example configuration:
 
 ```json
 {
-  "api_key": "...",
+  "api_key": "YOUR_GEMINI_API_KEY",
   "language": "tr-TR",
   "mode": "SMART",
+  "hotkey": "win+z",
   "custom_vocabulary": [
     "Proxmox",
     "Omarchy",
@@ -81,27 +108,41 @@ It is mode `0600`. A typical configuration is:
 }
 ```
 
-`mode` can be `SMART` or `VERBATIM`. `output_driver` can be `auto`, `kwtype`, or `wtype`. `custom_vocabulary` accepts up to 1000 entries; shorter focused lists are generally preferable.
+- `mode`: `SMART` or `VERBATIM`.
+- `output_driver`: `auto`, `sendinput` (Windows), `kwtype` / `wtype` (Linux).
+- `hotkey`: `win+z`, `alt+z`, `ctrl+alt+z`, etc. (used by Windows background daemon).
+- `custom_vocabulary`: supports up to 1000 domain-specific terms.
 
-Runtime state and diagnostic files live under `$XDG_RUNTIME_DIR/ai-dikte` and are not persistent across normal reboots. No audio recording file is written to disk during normal use.
+---
 
-## Use
+## Usage
 
-Press `Meta+Z` once to start recording. Press it again to stop. Gemini finalizes the transcription and the result is typed directly into the currently focused field.
+- **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` (or your configured hotkey) once to start recording, speak, and press it again to finish.
+- **Linux**: Press `Meta+Z` once to start recording, speak, and press it again to finish.
 
-Commands:
+### Commands
 
 ```bash
-ai-dikte toggle
-ai-dikte setup
-ai-dikte doctor
-ai-dikte shortcut-install
-ai-dikte shortcut-remove
+ai-dikte toggle            # Toggle dictation (start/stop)
+ai-dikte daemon            # Run background hotkey listener & system tray (Windows/Linux)
+ai-dikte setup             # Configure API key, hotkey, and preferences
+ai-dikte doctor            # Run diagnostic checks
+ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
+ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 ```
 
-## Remove
+---
 
-On Hyprland / Omarchy, remove the managed shortcut first:
+## Uninstallation
+
+### Windows
+
+1. Delete `%APPDATA%\ai-dikte` and `%LOCALAPPDATA%\ai-dikte`.
+2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` -> `shell:startup`).
+
+### Linux
+
+On Hyprland / Omarchy:
 
 ```bash
 ai-dikte shortcut-remove
