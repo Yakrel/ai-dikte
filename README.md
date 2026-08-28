@@ -51,14 +51,13 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-This installer:
-1. Installs required Python modules (`websockets`, `sounddevice`, `keyboard`, `pystray`, `pillow`).
-2. Configures silent background startup via Windows Startup (`shell:startup`).
-3. Runs interactive `setup` to configure your Google AI API key and preferred hotkey (default: `win+z` or `alt+z`).
+The Windows installer prefers the latest standalone `ai-dikte-windows.exe` from GitHub Releases. In the normal release path, Python and pip are not required. It installs the executable under `%LOCALAPPDATA%\Programs\AI-Dikte`, adds an `ai-dikte` launcher to the user PATH, configures startup, then runs `setup` and `doctor`.
+
+If no tagged standalone release exists yet, the installer temporarily falls back to the Python/source installation path so development builds remain installable.
 
 #### Standalone Executable (.exe)
 
-You can also download the pre-built `ai-dikte-windows.exe` directly from the [GitHub Releases / Actions](../../releases) page without installing Python.
+Tagged releases publish `ai-dikte-windows.exe` as a GitHub Release asset. Every Windows CI build also uploads the executable as a GitHub Actions artifact and smoke-tests the frozen binary before upload.
 
 ---
 
@@ -124,9 +123,10 @@ Example configuration:
 
 ```bash
 ai-dikte toggle            # Toggle dictation (start/stop)
-ai-dikte daemon            # Run background hotkey listener & system tray (Windows/Linux)
+ai-dikte daemon            # Run background hotkey listener & system tray
 ai-dikte setup             # Configure API key, hotkey, and preferences
 ai-dikte doctor            # Run diagnostic checks
+ai-dikte --version         # Print packaged version (also used by CI smoke test)
 ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
 ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 ```
@@ -137,8 +137,9 @@ ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 
 ### Windows
 
-1. Delete `%APPDATA%\ai-dikte` and `%LOCALAPPDATA%\ai-dikte`.
-2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` -> `shell:startup`).
+1. Delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
+2. Remove `ai-dikte-startup.cmd` from your Startup folder (`Win+R` -> `shell:startup`).
+3. Remove the AI Dikte install directory from your User PATH if desired.
 
 ### Linux
 
