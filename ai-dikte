@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Minimal Wayland dictation using Gemini 3.5 Transcribe Live."""
+"""Cross-platform minimal dictation tool using Gemini 3.5 Transcribe Live.
+
+Supports Linux (Wayland: Hyprland/KDE) and Windows (Direct SendInput & SoundDevice).
+"""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import fcntl
 import getpass
 import json
 import os
@@ -13,39 +15,63 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+# Platform detection
+IS_WINDOWS = sys.platform == "win32"
+
 try:
     import websockets
-except ImportError:  # pragma: no cover - reported by doctor/runtime checks
+except ImportError:  # pragma: no cover
     websockets = None
+
+try:
+    import sounddevice  # type: ignore
+except ImportError:  # pragma: no cover
+    sounddevice = None
+
+if IS_WINDOWS:
+    import msvcrt
+    import ctypes
+    from ctypes import wintypes
+else:
+    import fcntl
 
 APP = "ai-dikte"
 MODEL = "gemini-3.5-transcribe-live"
 DEFAULT_LANGUAGE = "tr-TR"
 DEFAULT_MODE = "SMART"
+DEFAULT_HOTKEY = "win+z" if IS_WINDOWS else "SUPER + Z"
 AUDIO_RATE = 16000
 AUDIO_CHANNELS = 1
 AUDIO_FORMAT = "s16"
-AUDIO_CHUNK_BYTES = 3200  # 100 ms: 1600 frames * 2 bytes
+AUDIO_CHUNK_BYTES = 3200  # 100 ms: 1600 frames * 2 bytes (16-bit PCM)
 WS_ENDPOINT = (
     "wss://generativelanguage.googleapis.com/ws/"
     "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 )
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+# Paths configuration
+if IS_WINDOWS:
+    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home() / ".config")) / APP
+    RUNTIME_DIR = Path(os.environ.get("LOCALAPPDATA", Path(tempfile.gettempdir()))) / APP / "runtime"
+else:
+    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+    RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/{APP}-{os.getuid()}")) / APP
+
 CONFIG_FILE = CONFIG_DIR / "config.json"
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/{APP}-{os.getuid()}")) / APP
 PID_FILE = RUNTIME_DIR / "session.pid"
 READY_FILE = RUNTIME_DIR / "session.ready"
 STOP_FILE = RUNTIME_DIR / "session.stop"
-ERROR_FILE = RUNTIME_DIR / "pw-record.stderr"
+ERROR_FILE = RUNTIME_DIR / "recorder.stderr"
 SESSION_LOG = RUNTIME_DIR / "session.log"
 LOCK_FILE = RUNTIME_DIR / "command.lock"
 
+# Linux Hyprland shortcut definitions
 HYPR_CONFIG_DIR = Path.home() / ".config" / "hypr"
 HYPR_BINDINGS_LUA = HYPR_CONFIG_DIR / "bindings.lua"
 HYPR_BINDINGS_CONF = HYPR_CONFIG_DIR / "bindings.conf"
@@ -61,10 +87,74 @@ HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/ai-dikte-toggle"
 
 def ensure_runtime() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    RUNTIME_DIR.chmod(0o700)
+    if not IS_WINDOWS:
+        try:
+            RUNTIME_DIR.chmod(0o700)
+        except OSError:
+            pass
+
+
+class FileLock:
+    """Cross-platform non-blocking file lock."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.file_handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if IS_WINDOWS:
+            self.file_handle = open(self.path, "w")
+            try:
+                msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                self.file_handle.close()
+                fail("Previous command is still running.")
+        else:
+            self.file_handle = open(self.path, "a+")
+            try:
+                fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError):
+                self.file_handle.close()
+                fail("Previous command is still running.")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file_handle:
+            try:
+                if IS_WINDOWS:
+                    self.file_handle.seek(0)
+                    msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            self.file_handle.close()
 
 
 def notify(title: str, message: str, urgency: str = "normal") -> None:
+    if IS_WINDOWS:
+        # On Windows, try PowerShell toast notification or fallback to console
+        ps_script = (
+            f'[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; '
+            f'$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); '
+            f'$textNodes = $template.GetElementsByTagName("text"); '
+            f'$textNodes.Item(0).AppendChild($template.CreateTextNode("{title}")) | Out-Null; '
+            f'$textNodes.Item(1).AppendChild($template.CreateTextNode("{message}")) | Out-Null; '
+            f'$toast = [Windows.UI.Notifications.ToastNotification]::new($template); '
+            f'[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("AI Dikte").Show($toast)'
+        )
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+        return
+
+    # Linux notify-send
     if not shutil.which("notify-send"):
         return
     subprocess.run(
@@ -135,9 +225,18 @@ def config_vocabulary(config: dict[str, Any]) -> list[str]:
 
 def config_output_driver(config: dict[str, Any]) -> str:
     driver = str(config.get("output_driver", "auto")).strip().lower() or "auto"
+    if IS_WINDOWS:
+        if driver not in {"auto", "sendinput"}:
+            raise RuntimeError("Config 'output_driver' on Windows must be auto or sendinput.")
+        return driver
     if driver not in {"auto", "kwtype", "wtype"}:
-        raise RuntimeError("Config 'output_driver' must be auto, kwtype, or wtype.")
+        raise RuntimeError("Config 'output_driver' on Linux must be auto, kwtype, or wtype.")
     return driver
+
+
+def config_hotkey(config: dict[str, Any]) -> str:
+    value = str(config.get("hotkey", DEFAULT_HOTKEY)).strip()
+    return value or DEFAULT_HOTKEY
 
 
 def setup() -> None:
@@ -147,6 +246,12 @@ def setup() -> None:
     if not key:
         fail("API key cannot be empty.")
 
+    hotkey = str(existing.get("hotkey", DEFAULT_HOTKEY)).strip()
+    if IS_WINDOWS:
+        user_hotkey = input(f"Hotkey for dictation (default '{hotkey}'): ").strip()
+        if user_hotkey:
+            hotkey = user_hotkey
+
     config = dict(existing)
     config.update(
         {
@@ -155,19 +260,26 @@ def setup() -> None:
             "mode": str(existing.get("mode", DEFAULT_MODE)) or DEFAULT_MODE,
             "custom_vocabulary": existing.get("custom_vocabulary", []),
             "output_driver": str(existing.get("output_driver", "auto")) or "auto",
+            "hotkey": hotkey,
         }
     )
 
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    CONFIG_FILE.chmod(0o600)
+    if not IS_WINDOWS:
+        try:
+            CONFIG_FILE.chmod(0o600)
+        except OSError:
+            pass
     print(f"[OK] Saved: {CONFIG_FILE}")
 
-    if desktop_kind() == "hyprland":
+    if not IS_WINDOWS and desktop_kind() == "hyprland":
         install_hyprland_shortcut()
 
 
 def desktop_kind() -> str:
+    if IS_WINDOWS:
+        return "windows"
     desktop = " ".join(
         filter(
             None,
@@ -187,6 +299,9 @@ def desktop_kind() -> str:
 
 
 def output_candidates(config: dict[str, Any] | None = None) -> list[str]:
+    if IS_WINDOWS:
+        return ["sendinput"]
+
     config = config or load_config(required=False)
     forced = config_output_driver(config)
     if forced != "auto":
@@ -201,14 +316,71 @@ def output_candidates(config: dict[str, Any] | None = None) -> list[str]:
 
 
 def available_output_driver(config: dict[str, Any] | None = None) -> str | None:
+    if IS_WINDOWS:
+        return "sendinput"
     for driver in output_candidates(config):
         if shutil.which(driver):
             return driver
     return None
 
 
+def output_text_windows(text: str) -> str:
+    """Inject text directly into active window using Win32 SendInput KEYEVENTF_UNICODE."""
+    # Allow time for physical modifier keys (e.g. Win/Alt) to release
+    time.sleep(0.08)
+
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+    INPUT_KEYBOARD = 1
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else wintypes.DWORD),
+        ]
+
+    class INPUT(ctypes.Structure):
+        class _INPUT_UNION(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT)]
+
+        _anonymous_ = ("_u",)
+        _fields_ = [("type", wintypes.DWORD), ("_u", _INPUT_UNION)]
+
+    # Encode text to UTF-16 LE code units to support full BMP and supplementary characters (emojis)
+    utf16_bytes = text.encode("utf-16le")
+    code_units = [int.from_bytes(utf16_bytes[i : i + 2], "little") for i in range(0, len(utf16_bytes), 2)]
+
+    inputs = []
+    for code in code_units:
+        # Key down
+        inp_down = INPUT(type=INPUT_KEYBOARD)
+        inp_down.ki = KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE, time=0, dwExtraInfo=0)
+        inputs.append(inp_down)
+
+        # Key up
+        inp_up = INPUT(type=INPUT_KEYBOARD)
+        inp_up.ki = KEYBDINPUT(
+            wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, time=0, dwExtraInfo=0
+        )
+        inputs.append(inp_up)
+
+    if inputs:
+        arr = (INPUT * len(inputs))(*inputs)
+        sent = ctypes.windll.user32.SendInput(len(inputs), arr, ctypes.sizeof(INPUT))
+        if sent != len(inputs):
+            raise RuntimeError(f"SendInput injected {sent}/{len(inputs)} input events.")
+
+    return "sendinput"
+
+
 def output_text(text: str) -> str:
-    # Allow time for physical modifier keys (e.g. Super/Mod4 from toggle shortcut) to release
+    if IS_WINDOWS:
+        return output_text_windows(text)
+
+    # Linux: wtype / kwtype direct typing
     time.sleep(0.06)
     errors: list[str] = []
     for driver in output_candidates():
@@ -292,6 +464,10 @@ def reload_hyprland() -> None:
 
 
 def install_hyprland_shortcut() -> None:
+    if IS_WINDOWS:
+        print("[INFO] Hyprland shortcuts are only applicable on Linux.")
+        return
+
     target, binding, start_marker, end_marker = hyprland_shortcut_target()
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -317,6 +493,9 @@ def install_hyprland_shortcut() -> None:
 
 
 def remove_hyprland_shortcut() -> None:
+    if IS_WINDOWS:
+        return
+
     removed: list[Path] = []
     for path in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
         if remove_managed_shortcut_block(path):
@@ -339,6 +518,20 @@ def read_pid() -> int | None:
 
 
 def pid_alive(pid: int) -> bool:
+    if IS_WINDOWS:
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
+        )
+        if not handle:
+            return False
+        exit_code = wintypes.DWORD()
+        res = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        STILL_ACTIVE = 259
+        return bool(res and exit_code.value == STILL_ACTIVE)
+
     try:
         os.kill(pid, 0)
         return True
@@ -349,6 +542,9 @@ def pid_alive(pid: int) -> bool:
 def session_matches(pid: int) -> bool:
     if not pid_alive(pid):
         return False
+
+    if IS_WINDOWS:
+        return True
 
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
@@ -369,26 +565,46 @@ def clear_runtime_state() -> None:
 def start_live_session() -> None:
     load_api_key()
     if websockets is None:
-        fail("Python websockets module is missing. Install python-websockets.")
-    if not shutil.which("pw-record"):
-        fail("pw-record is missing.")
-    if not available_output_driver():
-        fail("No supported direct typing driver found (kwtype/wtype).")
+        fail("Python websockets module is missing. Install python-websockets / pip install websockets.")
+
+    if IS_WINDOWS:
+        if sounddevice is None:
+            fail("Python sounddevice module is missing. Run 'pip install sounddevice'.")
+    else:
+        if not shutil.which("pw-record") and sounddevice is None:
+            fail("pw-record or python-sounddevice is required for audio recording.")
+        if not available_output_driver():
+            fail("No supported direct typing driver found (kwtype/wtype).")
 
     clear_runtime_state()
     SESSION_LOG.unlink(missing_ok=True)
+
+    creation_flags = 0
+    start_new_session = True
+    if IS_WINDOWS:
+        start_new_session = False
+        # CREATE_NO_WINDOW = 0x08000000, DETACHED_PROCESS = 0x00000008
+        creation_flags = 0x08000000 | 0x00000008
+
+    script_path = str(Path(__file__).resolve())
     with SESSION_LOG.open("ab", buffering=0) as log_handle:
         process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "_live-session"],
+            [sys.executable, script_path, "_live-session"],
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
+            start_new_session=start_new_session,
+            creationflags=creation_flags,
+            close_fds=not IS_WINDOWS,
         )
 
     PID_FILE.write_text(str(process.pid), encoding="ascii")
-    PID_FILE.chmod(0o600)
+    if not IS_WINDOWS:
+        try:
+            PID_FILE.chmod(0o600)
+        except OSError:
+            pass
+
     time.sleep(0.08)
     if process.poll() is not None:
         details = SESSION_LOG.read_text(errors="replace")[-700:] if SESSION_LOG.exists() else ""
@@ -397,7 +613,7 @@ def start_live_session() -> None:
 
 
 def request_stop() -> None:
-    STOP_FILE.touch(mode=0o600, exist_ok=True)
+    STOP_FILE.touch(exist_ok=True)
     notify("AI Dikte", "Transcribing…")
 
 
@@ -414,8 +630,66 @@ def toggle() -> None:
     start_live_session()
 
 
+class SoundDeviceStreamRecorder:
+    """Asynchronous audio capture using sounddevice RawInputStream."""
+
+    def __init__(self, sample_rate: int = AUDIO_RATE, chunk_bytes: int = AUDIO_CHUNK_BYTES):
+        self.sample_rate = sample_rate
+        self.chunk_bytes = chunk_bytes
+        self.block_frames = chunk_bytes // 2  # 16-bit PCM = 2 bytes per frame
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self.stream = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.running = False
+
+    def _callback(self, indata: bytes, frames: int, time_info: Any, status: Any) -> None:
+        if self.running and self.loop and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, bytes(indata))
+
+    def start(self, loop: asyncio.AbstractEventLoop) -> None:
+        if sounddevice is None:
+            raise RuntimeError("sounddevice is not installed.")
+        self.loop = loop
+        self.running = True
+        self.stream = sounddevice.RawInputStream(
+            samplerate=self.sample_rate,
+            channels=AUDIO_CHANNELS,
+            dtype=AUDIO_FORMAT,
+            blocksize=self.block_frames,
+            callback=self._callback,
+        )
+        self.stream.start()
+
+    async def read(self) -> bytes:
+        return await self.queue.get()
+
+    def stop(self) -> None:
+        self.running = False
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
+
+
 async def stop_recorder(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
+        return
+
+    if IS_WINDOWS:
+        try:
+            process.terminate()
+            await asyncio.wait_for(process.wait(), timeout=1.0)
+            return
+        except (OSError, asyncio.TimeoutError):
+            pass
+        try:
+            process.kill()
+            await process.wait()
+        except OSError:
+            pass
         return
 
     try:
@@ -613,46 +887,62 @@ async def live_session() -> None:
     if not api_key:
         raise RuntimeError("API key missing. Run 'ai-dikte setup'.")
     if websockets is None:
-        raise RuntimeError("Python websockets module is missing. Install python-websockets.")
+        raise RuntimeError("Python websockets module is missing. Install websockets.")
 
     ERROR_FILE.unlink(missing_ok=True)
-    recorder: asyncio.subprocess.Process | None = None
+    recorder_proc: asyncio.subprocess.Process | None = None
+    sd_recorder: SoundDeviceStreamRecorder | None = None
     websocket = None
     receiver_task: asyncio.Task[None] | None = None
     finals_queue: asyncio.Queue[str] = asyncio.Queue()
     turn_complete_event = asyncio.Event()
 
-    try:
-        with ERROR_FILE.open("wb") as error_handle:
-            recorder = await asyncio.create_subprocess_exec(
-                "pw-record",
-                "--raw",
-                f"--rate={AUDIO_RATE}",
-                f"--channels={AUDIO_CHANNELS}",
-                f"--format={AUDIO_FORMAT}",
-                "-",
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=error_handle,
-                start_new_session=True,
-            )
+    use_sounddevice = IS_WINDOWS or not shutil.which("pw-record")
 
-        await asyncio.sleep(0.18)
-        if recorder.returncode is not None:
-            details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
-            raise RuntimeError(f"Could not start recording. {details.strip()}")
+    try:
+        loop = asyncio.get_running_loop()
+        if use_sounddevice:
+            sd_recorder = SoundDeviceStreamRecorder()
+            sd_recorder.start(loop)
+        else:
+            with ERROR_FILE.open("wb") as error_handle:
+                recorder_proc = await asyncio.create_subprocess_exec(
+                    "pw-record",
+                    "--raw",
+                    f"--rate={AUDIO_RATE}",
+                    f"--channels={AUDIO_CHANNELS}",
+                    f"--format={AUDIO_FORMAT}",
+                    "-",
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=error_handle,
+                    start_new_session=True,
+                )
+            await asyncio.sleep(0.18)
+            if recorder_proc.returncode is not None:
+                details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+                raise RuntimeError(f"Could not start recording. {details.strip()}")
 
         READY_FILE.write_text("ready\n", encoding="ascii")
-        READY_FILE.chmod(0o600)
+        if not IS_WINDOWS:
+            try:
+                READY_FILE.chmod(0o600)
+            except OSError:
+                pass
         notify("AI Dikte", "Recording started")
 
         connect_task = asyncio.create_task(open_live_websocket(api_key, config))
         buffered_audio: list[bytes] = []
 
-        assert recorder.stdout is not None
+        async def get_audio_chunk() -> bytes:
+            if sd_recorder is not None:
+                return await sd_recorder.read()
+            assert recorder_proc is not None and recorder_proc.stdout is not None
+            return await recorder_proc.stdout.read(AUDIO_CHUNK_BYTES)
+
         while not connect_task.done() and not STOP_FILE.exists():
             try:
-                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+                chunk = await asyncio.wait_for(get_audio_chunk(), timeout=0.1)
             except asyncio.TimeoutError:
                 continue
             if not chunk:
@@ -673,7 +963,7 @@ async def live_session() -> None:
 
         while not STOP_FILE.exists():
             try:
-                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+                chunk = await asyncio.wait_for(get_audio_chunk(), timeout=0.1)
             except asyncio.TimeoutError:
                 continue
             if not chunk:
@@ -682,22 +972,29 @@ async def live_session() -> None:
             await raise_if_receiver_failed(receiver_task)
             await send_audio(websocket, chunk)
 
-        await stop_recorder(recorder)
+        if sd_recorder is not None:
+            sd_recorder.stop()
+        elif recorder_proc is not None:
+            await stop_recorder(recorder_proc)
 
-        while True:
-            chunk = await recorder.stdout.read(AUDIO_CHUNK_BYTES)
-            if not chunk:
-                break
-            await raise_if_receiver_failed(receiver_task)
-            await send_audio(websocket, chunk)
+        # Drain remaining buffer
+        if recorder_proc is not None and recorder_proc.stdout is not None:
+            while True:
+                chunk = await recorder_proc.stdout.read(AUDIO_CHUNK_BYTES)
+                if not chunk:
+                    break
+                await raise_if_receiver_failed(receiver_task)
+                await send_audio(websocket, chunk)
 
         await websocket.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
         text = await collect_final_transcript(finals_queue, receiver_task, turn_complete_event)
         driver = output_text(text)
         notify("AI Dikte", f"Text ready ({driver})")
     finally:
-        if recorder is not None and recorder.returncode is None:
-            await stop_recorder(recorder)
+        if sd_recorder is not None:
+            sd_recorder.stop()
+        if recorder_proc is not None and recorder_proc.returncode is None:
+            await stop_recorder(recorder_proc)
         if receiver_task is not None and not receiver_task.done():
             receiver_task.cancel()
             try:
@@ -717,28 +1014,101 @@ async def live_session() -> None:
             ERROR_FILE.unlink(missing_ok=True)
 
 
+def run_daemon() -> None:
+    """Run in background with global hotkey and system tray icon."""
+    config = load_config()
+    hotkey = config_hotkey(config)
+
+    print(f"[*] Starting AI Dikte daemon...")
+    print(f"[*] Dictation hotkey: {hotkey}")
+
+    try:
+        import keyboard
+    except ImportError:
+        fail("Python 'keyboard' module is required for daemon mode. Run: pip install keyboard")
+
+    # Set up global hotkey
+    try:
+        keyboard.add_hotkey(hotkey, toggle)
+        print(f"[OK] Global hotkey '{hotkey}' registered.")
+    except Exception as exc:
+        fail(f"Could not register hotkey '{hotkey}': {exc}")
+
+    # Set up System Tray if pystray & Pillow are available
+    tray_icon = None
+    try:
+        from PIL import Image, ImageDraw
+        import pystray
+
+        def create_tray_image(color="gray"):
+            img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            # Draw microphone-like circle badge
+            fill_color = {"gray": "#6b7280", "red": "#ef4444", "blue": "#3b82f6"}.get(color, color)
+            draw.ellipse((8, 8, 56, 56), fill=fill_color)
+            # Inner dot
+            draw.ellipse((24, 24, 40, 40), fill="white")
+            return img
+
+        def on_toggle_clicked(icon, item):
+            toggle()
+
+        def on_exit_clicked(icon, item):
+            icon.stop()
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Toggle Dikte", on_toggle_clicked, default=True),
+            pystray.MenuItem("Setup", lambda: subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "setup"])),
+            pystray.MenuItem("Doctor", lambda: subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "doctor"])),
+            pystray.MenuItem("Exit", on_exit_clicked),
+        )
+
+        tray_icon = pystray.Icon("ai-dikte", create_tray_image("blue"), "AI Dikte", menu)
+        print("[OK] System Tray icon active.")
+        tray_icon.run()
+    except ImportError:
+        print("[INFO] pystray/Pillow not installed. Running headless hotkey listener (Press Ctrl+C to quit).")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[*] Daemon stopped.")
+
+
 def doctor() -> None:
     config = load_config(required=False)
     driver = available_output_driver(config)
     desktop = desktop_kind()
 
-    checks = {
-        "wayland": bool(os.environ.get("WAYLAND_DISPLAY")),
-        "pw-record": bool(shutil.which("pw-record")),
-        "notify-send": bool(shutil.which("notify-send")),
-        "python-websockets": websockets is not None,
-        "config": CONFIG_FILE.exists(),
-        "api-key": bool(str(config.get("api_key", "")).strip()),
-        "direct-typing": bool(driver),
-    }
+    if IS_WINDOWS:
+        checks = {
+            "platform-windows": True,
+            "sounddevice": sounddevice is not None,
+            "python-websockets": websockets is not None,
+            "direct-typing (SendInput)": bool(driver),
+            "config": CONFIG_FILE.exists(),
+            "api-key": bool(str(config.get("api_key", "")).strip()),
+        }
+    else:
+        checks = {
+            "wayland": bool(os.environ.get("WAYLAND_DISPLAY")),
+            "pw-record": bool(shutil.which("pw-record")),
+            "notify-send": bool(shutil.which("notify-send")),
+            "python-websockets": websockets is not None,
+            "config": CONFIG_FILE.exists(),
+            "api-key": bool(str(config.get("api_key", "")).strip()),
+            "direct-typing": bool(driver),
+        }
 
     for name, ok in checks.items():
-        suffix = f" ({driver})" if name == "direct-typing" and driver else ""
+        suffix = f" ({driver})" if name in ("direct-typing", "direct-typing (SendInput)") and driver else ""
         print(f"{'✓' if ok else '✗'} {name}{suffix}")
-    print(f"i desktop: {desktop}")
+    print(f"i desktop/os: {desktop}")
     print(f"i model: {MODEL}")
+    if IS_WINDOWS:
+        print(f"i hotkey: {config_hotkey(config)}")
 
-    if desktop == "hyprland":
+    if not IS_WINDOWS and desktop == "hyprland":
         target, _, start_marker, _ = hyprland_shortcut_target()
         installed = False
         if target.exists():
@@ -772,12 +1142,11 @@ def main() -> None:
             raise SystemExit(1)
         return
 
-    with LOCK_FILE.open("a+") as lock:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            fail("Previous command is still running.")
+    if command == "daemon" or command == "run":
+        run_daemon()
+        return
 
+    with FileLock(LOCK_FILE):
         if command == "toggle":
             toggle()
         elif command == "setup":
@@ -791,7 +1160,7 @@ def main() -> None:
         else:
             print(
                 "Usage: ai-dikte "
-                "{toggle|setup|doctor|shortcut-install|shortcut-remove}"
+                "{toggle|daemon|setup|doctor|shortcut-install|shortcut-remove}"
             )
             raise SystemExit(2)
 
