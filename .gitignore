@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+pkg/
+src/
+build/
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.pkg.tar.gz
+*.tar.gz

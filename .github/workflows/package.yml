@@ -1,0 +1,32 @@
+name: Arch package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          kwayland libnotify libxkbcommon pipewire-audio python python-websockets
+          qt6-base wayland wtype meson ninja pkgconf
+
+      - name: Check Python syntax
+        run: python -m py_compile ai-dikte
+
+      - name: Build package
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder .
+          runuser -u builder -- makepkg --noconfirm --cleanbuild
