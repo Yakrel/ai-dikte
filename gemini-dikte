@@ -48,9 +48,12 @@ LOCK_FILE = RUNTIME_DIR / "command.lock"
 HYPR_CONFIG_DIR = Path.home() / ".config" / "hypr"
 HYPR_BINDINGS_LUA = HYPR_CONFIG_DIR / "bindings.lua"
 HYPR_BINDINGS_CONF = HYPR_CONFIG_DIR / "bindings.conf"
+HYPR_HYPRLAND_CONF = HYPR_CONFIG_DIR / "hyprland.conf"
 HYPRLAND_LUA = HYPR_CONFIG_DIR / "hyprland.lua"
-HYPR_MARKER_START = "# >>> gemini-dikte >>>"
-HYPR_MARKER_END = "# <<< gemini-dikte <<<"
+HYPR_MARKER_START_LUA = "-- >>> gemini-dikte >>>"
+HYPR_MARKER_END_LUA = "-- <<< gemini-dikte <<<"
+HYPR_MARKER_START_CONF = "# >>> gemini-dikte >>>"
+HYPR_MARKER_END_CONF = "# <<< gemini-dikte <<<"
 HYPR_BINDING_LUA = 'o.bind("SUPER + Z", "Gemini Dictation", "/usr/bin/gemini-dikte-toggle")'
 HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/gemini-dikte-toggle"
 
@@ -204,6 +207,8 @@ def available_output_driver(config: dict[str, Any] | None = None) -> str | None:
 
 
 def output_text(text: str) -> str:
+    # Allow time for physical modifier keys (e.g. Super/Mod4 from toggle shortcut) to release
+    time.sleep(0.06)
     errors: list[str] = []
     for driver in output_candidates():
         executable = shutil.which(driver)
@@ -233,12 +238,16 @@ def output_text(text: str) -> str:
     raise RuntimeError("Direct text injection failed. " + "; ".join(errors))
 
 
-def hyprland_shortcut_target() -> tuple[Path, str]:
+def hyprland_shortcut_target() -> tuple[Path, str, str, str]:
     # Omarchy 4 / Quattro uses Lua user configuration. Keep legacy Hyprland
     # .conf support for older Omarchy and generic Hyprland installations.
     if HYPRLAND_LUA.exists() or HYPR_BINDINGS_LUA.exists():
-        return HYPR_BINDINGS_LUA, HYPR_BINDING_LUA
-    return HYPR_BINDINGS_CONF, HYPR_BINDING_CONF
+        return HYPR_BINDINGS_LUA, HYPR_BINDING_LUA, HYPR_MARKER_START_LUA, HYPR_MARKER_END_LUA
+    if HYPR_BINDINGS_CONF.exists():
+        return HYPR_BINDINGS_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
+    if HYPR_HYPRLAND_CONF.exists():
+        return HYPR_HYPRLAND_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
+    return HYPR_BINDINGS_CONF, HYPR_BINDING_CONF, HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF
 
 
 def remove_managed_shortcut_block(path: Path) -> bool:
@@ -246,16 +255,29 @@ def remove_managed_shortcut_block(path: Path) -> bool:
         return False
 
     text = path.read_text(encoding="utf-8")
-    start = text.find(HYPR_MARKER_START)
-    end = text.find(HYPR_MARKER_END, start + len(HYPR_MARKER_START)) if start != -1 else -1
-    if start == -1 or end == -1:
-        return False
+    modified = False
 
-    end += len(HYPR_MARKER_END)
-    if end < len(text) and text[end] == "\n":
-        end += 1
-    path.write_text(text[:start] + text[end:], encoding="utf-8")
-    return True
+    for start_marker, end_marker in (
+        (HYPR_MARKER_START_LUA, HYPR_MARKER_END_LUA),
+        (HYPR_MARKER_START_CONF, HYPR_MARKER_END_CONF),
+    ):
+        while True:
+            start = text.find(start_marker)
+            if start == -1:
+                break
+            end = text.find(end_marker, start + len(start_marker))
+            if end == -1:
+                break
+            end += len(end_marker)
+            if end < len(text) and text[end] == "\n":
+                end += 1
+            text = text[:start] + text[end:]
+            modified = True
+
+    if modified:
+        path.write_text(text, encoding="utf-8")
+        return True
+    return False
 
 
 def reload_hyprland() -> None:
@@ -269,17 +291,22 @@ def reload_hyprland() -> None:
 
 
 def install_hyprland_shortcut() -> None:
-    target, binding = hyprland_shortcut_target()
+    target, binding, start_marker, end_marker = hyprland_shortcut_target()
     target.parent.mkdir(parents=True, exist_ok=True)
 
     # Remove a block created by an older gemini-dikte version if the user's
     # Hyprland configuration format changed (notably Omarchy 3 -> 4).
-    other = HYPR_BINDINGS_CONF if target == HYPR_BINDINGS_LUA else HYPR_BINDINGS_LUA
-    remove_managed_shortcut_block(other)
+    for candidate in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
+        if candidate != target:
+            remove_managed_shortcut_block(candidate)
 
     current = target.read_text(encoding="utf-8") if target.exists() else ""
-    if HYPR_MARKER_START not in current:
-        block = f"{HYPR_MARKER_START}\n{binding}\n{HYPR_MARKER_END}\n"
+    if (
+        start_marker not in current
+        and HYPR_MARKER_START_LUA not in current
+        and HYPR_MARKER_START_CONF not in current
+    ):
+        block = f"{start_marker}\n{binding}\n{end_marker}\n"
         separator = "" if not current or current.endswith("\n") else "\n"
         with target.open("a", encoding="utf-8") as handle:
             handle.write(separator + block)
@@ -292,7 +319,7 @@ def install_hyprland_shortcut() -> None:
 
 def remove_hyprland_shortcut() -> None:
     removed: list[Path] = []
-    for path in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF):
+    for path in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
         if remove_managed_shortcut_block(path):
             removed.append(path)
 
@@ -436,14 +463,17 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
         raise RuntimeError("Python websockets module is missing.")
 
     url = f"{WS_ENDPOINT}?key={quote(api_key, safe='')}"
-    websocket = await websockets.connect(
-        url,
-        open_timeout=10,
-        close_timeout=2,
-        ping_interval=20,
-        ping_timeout=20,
-        max_size=4 * 1024 * 1024,
-    )
+    try:
+        websocket = await websockets.connect(
+            url,
+            open_timeout=10,
+            close_timeout=2,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=4 * 1024 * 1024,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Could not connect to Gemini Live API: {exc}") from exc
 
     input_transcription: dict[str, Any] = {
         "languageCodes": [config_language(config)],
@@ -468,7 +498,19 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
-        raw = await asyncio.wait_for(websocket.recv(), timeout=max(0.1, remaining))
+        try:
+            raw = await asyncio.wait_for(websocket.recv(), timeout=max(0.1, remaining))
+        except asyncio.TimeoutError:
+            break
+        except websockets.exceptions.ConnectionClosed as exc:
+            code = getattr(exc, "code", None)
+            reason = getattr(exc, "reason", "") or str(exc)
+            if code in (1008, 4403):
+                raise RuntimeError(
+                    f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
+                ) from exc
+            raise RuntimeError(f"Gemini Live API connection closed during setup ({code}): {reason}") from exc
+
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8", errors="replace")
         message = json.loads(raw)
@@ -495,23 +537,38 @@ async def send_audio(websocket, chunk: bytes) -> None:
     await websocket.send(json.dumps(message))
 
 
-async def receive_transcriptions(websocket, finals: asyncio.Queue[str]) -> None:
+async def receive_transcriptions(
+    websocket, finals: asyncio.Queue[str], turn_complete_event: asyncio.Event
+) -> None:
     """Drain Live API messages continuously and retain finalized transcripts only."""
-    async for raw in websocket:
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8", errors="replace")
-        message = json.loads(raw)
-        error = parse_server_error(message)
-        if error:
-            raise RuntimeError(error)
+    try:
+        async for raw in websocket:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            message = json.loads(raw)
+            error = parse_server_error(message)
+            if error:
+                raise RuntimeError(error)
 
-        content = message.get("serverContent") or {}
-        final = content.get("inputTranscription") or {}
-        text = str(final.get("text", "")).strip()
-        if text:
-            await finals.put(text)
-        # interimInputTranscription is deliberately ignored. It is drained here
-        # so WebSocket receive backpressure cannot build up while recording.
+            content = message.get("serverContent") or {}
+            final = content.get("inputTranscription") or {}
+            text = str(final.get("text", "")).strip()
+            if text:
+                await finals.put(text)
+
+            if content.get("turnComplete"):
+                turn_complete_event.set()
+            # interimInputTranscription is deliberately ignored. It is drained here
+            # so WebSocket receive backpressure cannot build up while recording.
+    except websockets.exceptions.ConnectionClosed as exc:
+        code = getattr(exc, "code", None)
+        reason = getattr(exc, "reason", "") or str(exc)
+        if code in (1008, 4403):
+            raise RuntimeError(
+                f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
+            ) from exc
+        if code and code != 1000:
+            raise RuntimeError(f"Gemini WebSocket connection closed unexpectedly ({code}): {reason}") from exc
 
 
 async def raise_if_receiver_failed(receiver_task: asyncio.Task[None]) -> None:
@@ -520,19 +577,28 @@ async def raise_if_receiver_failed(receiver_task: asyncio.Task[None]) -> None:
 
 
 async def collect_final_transcript(
-    finals_queue: asyncio.Queue[str], receiver_task: asyncio.Task[None]
+    finals_queue: asyncio.Queue[str],
+    receiver_task: asyncio.Task[None],
+    turn_complete_event: asyncio.Event,
 ) -> str:
     finals: list[str] = []
-    deadline = time.monotonic() + 12.0
+    deadline = time.monotonic() + 15.0
 
     while time.monotonic() < deadline:
         await raise_if_receiver_failed(receiver_task)
-        timeout = 0.7 if finals else min(2.0, max(0.1, deadline - time.monotonic()))
+        if turn_complete_event.is_set() and finals_queue.empty():
+            break
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        timeout = 1.5 if finals else min(3.0, max(0.1, remaining))
         try:
             text = await asyncio.wait_for(finals_queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
             await raise_if_receiver_failed(receiver_task)
-            if finals:
+            if turn_complete_event.is_set() or finals:
                 break
             continue
 
@@ -557,6 +623,7 @@ async def live_session() -> None:
     websocket = None
     receiver_task: asyncio.Task[None] | None = None
     finals_queue: asyncio.Queue[str] = asyncio.Queue()
+    turn_complete_event = asyncio.Event()
 
     try:
         with ERROR_FILE.open("wb") as error_handle:
@@ -573,60 +640,62 @@ async def live_session() -> None:
                 start_new_session=True,
             )
 
-            await asyncio.sleep(0.18)
-            if recorder.returncode is not None:
+        await asyncio.sleep(0.18)
+        if recorder.returncode is not None:
+            details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+            raise RuntimeError(f"Could not start recording. {details.strip()}")
+
+        READY_FILE.write_text("ready\n", encoding="ascii")
+        READY_FILE.chmod(0o600)
+        notify("Gemini Dictation", "Recording started")
+
+        connect_task = asyncio.create_task(open_live_websocket(api_key, config))
+        buffered_audio: list[bytes] = []
+
+        assert recorder.stdout is not None
+        while not connect_task.done() and not STOP_FILE.exists():
+            try:
+                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            if not chunk:
                 details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
-                raise RuntimeError(f"Could not start recording. {details.strip()}")
+                raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
+            buffered_audio.append(chunk)
 
-            READY_FILE.write_text("ready\n", encoding="ascii")
-            READY_FILE.chmod(0o600)
-            notify("Gemini Dictation", "Recording started")
+        websocket = await connect_task
+        receiver_task = asyncio.create_task(
+            receive_transcriptions(websocket, finals_queue, turn_complete_event)
+        )
+        await websocket.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
 
-            connect_task = asyncio.create_task(open_live_websocket(api_key, config))
-            buffered_audio: list[bytes] = []
+        for chunk in buffered_audio:
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
+        buffered_audio.clear()
 
-            assert recorder.stdout is not None
-            while not connect_task.done() and not STOP_FILE.exists():
-                try:
-                    chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-                if not chunk:
-                    details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
-                    raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
-                buffered_audio.append(chunk)
+        while not STOP_FILE.exists():
+            try:
+                chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            if not chunk:
+                details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
+                raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
 
-            websocket = await connect_task
-            receiver_task = asyncio.create_task(receive_transcriptions(websocket, finals_queue))
-            await websocket.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
+        await stop_recorder(recorder)
 
-            for chunk in buffered_audio:
-                await raise_if_receiver_failed(receiver_task)
-                await send_audio(websocket, chunk)
-            buffered_audio.clear()
-
-            while not STOP_FILE.exists():
-                try:
-                    chunk = await asyncio.wait_for(recorder.stdout.read(AUDIO_CHUNK_BYTES), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-                if not chunk:
-                    details = ERROR_FILE.read_text(errors="replace")[-500:] if ERROR_FILE.exists() else ""
-                    raise RuntimeError(f"Recording stopped unexpectedly. {details.strip()}")
-                await raise_if_receiver_failed(receiver_task)
-                await send_audio(websocket, chunk)
-
-            await stop_recorder(recorder)
-
-            while True:
-                chunk = await recorder.stdout.read(AUDIO_CHUNK_BYTES)
-                if not chunk:
-                    break
-                await raise_if_receiver_failed(receiver_task)
-                await send_audio(websocket, chunk)
+        while True:
+            chunk = await recorder.stdout.read(AUDIO_CHUNK_BYTES)
+            if not chunk:
+                break
+            await raise_if_receiver_failed(receiver_task)
+            await send_audio(websocket, chunk)
 
         await websocket.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
-        text = await collect_final_transcript(finals_queue, receiver_task)
+        text = await collect_final_transcript(finals_queue, receiver_task, turn_complete_event)
         driver = output_text(text)
         notify("Gemini Dictation", f"Text ready ({driver})")
     finally:
@@ -673,11 +742,16 @@ def doctor() -> None:
     print(f"i model: {MODEL}")
 
     if desktop == "hyprland":
-        target, _ = hyprland_shortcut_target()
+        target, _, start_marker, _ = hyprland_shortcut_target()
         installed = False
         if target.exists():
             try:
-                installed = HYPR_MARKER_START in target.read_text(encoding="utf-8")
+                content = target.read_text(encoding="utf-8")
+                installed = (
+                    start_marker in content
+                    or HYPR_MARKER_START_CONF in content
+                    or HYPR_MARKER_START_LUA in content
+                )
             except OSError:
                 pass
         print(f"{'✓' if installed else '✗'} Meta+Z Hyprland binding ({target.name})")

@@ -45,7 +45,7 @@ gemini-dikte doctor
 `setup` stores the Gemini API key and, when Hyprland is detected, installs a managed `Meta+Z` binding using the active Hyprland configuration format:
 
 - Omarchy 4 / Quattro: `~/.config/hypr/bindings.lua`
-- legacy Omarchy / generic Hyprland `.conf` setups: `~/.config/hypr/bindings.conf`
+- legacy Omarchy / generic Hyprland setups: `~/.config/hypr/bindings.conf` or `~/.config/hypr/hyprland.conf`
 
 If a managed block from an older Gemini Dictation version exists in the other format, setup removes that old block before installing the current one. KDE Plasma gets the same `Meta+Z` shortcut through the installed KGlobalAccel desktop entry.
 
