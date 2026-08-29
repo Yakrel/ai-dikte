@@ -1,0 +1,45 @@
+name: Cleanup Actions History
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-actions.yml'
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-actions-history
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep only the newest completed runs per workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_RUNS: '5'
+        run: |
+          set -euo pipefail
+          declare -A seen=()
+
+          while IFS=$'\t' read -r workflow_id run_id; do
+            count=${seen[$workflow_id]:-0}
+            count=$((count + 1))
+            seen[$workflow_id]=$count
+
+            if (( count > KEEP_RUNS )); then
+              echo "Deleting workflow run $run_id (workflow $workflow_id)"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+            fi
+          done < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?status=completed&per_page=100" \
+              --jq '.workflow_runs[] | [.workflow_id, .id] | @tsv'
+          )

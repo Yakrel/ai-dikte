@@ -51,13 +51,15 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-The Windows installer prefers the latest standalone `ai-dikte-windows.exe` from GitHub Releases. In the normal release path, Python and pip are not required. It installs the executable under `%LOCALAPPDATA%\Programs\AI-Dikte`, adds an `ai-dikte` launcher to the user PATH, configures startup, then runs `setup` and `doctor`.
+The installer downloads the latest runtime-tested standalone `ai-dikte-windows.exe` from GitHub Releases, installs it under `%LOCALAPPDATA%\Programs\AI-Dikte`, puts the `ai-dikte` launcher first in the user PATH, creates a hidden Startup launcher, then runs `setup` and `doctor`. Python and pip are not required for the normal Windows installation.
 
-If no tagged standalone release exists yet, the installer temporarily falls back to the Python/source installation path so development builds remain installable.
+If GitHub Releases is temporarily unavailable, the installer can fall back to a Python/source installation when Python is already installed.
 
 #### Standalone Executable (.exe)
 
-Tagged releases publish `ai-dikte-windows.exe` as a GitHub Release asset. Every Windows CI build also uploads the executable as a GitHub Actions artifact and smoke-tests the frozen binary before upload.
+Every successful push to `main` refreshes the **Latest Windows Build** GitHub Release with a newly built and runtime-tested `ai-dikte-windows.exe`. Tags matching `v*` additionally create normal versioned releases.
+
+The Windows CI validates both the packaged version command and a frozen-runtime self-test that imports the actual Windows dependencies (`websockets`, `sounddevice`, `keyboard`, `pystray`, and Pillow) before publishing the binary.
 
 ---
 
@@ -126,10 +128,22 @@ ai-dikte toggle            # Toggle dictation (start/stop)
 ai-dikte daemon            # Run background hotkey listener & system tray
 ai-dikte setup             # Configure API key, hotkey, and preferences
 ai-dikte doctor            # Run diagnostic checks
-ai-dikte --version         # Print packaged version (also used by CI smoke test)
 ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
 ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 ```
+
+Windows standalone diagnostics also support:
+
+```powershell
+ai-dikte --version
+ai-dikte --self-test
+```
+
+---
+
+## CI Maintenance
+
+GitHub Actions artifacts are retained for 7 days. A scheduled cleanup workflow runs daily and keeps only the newest 5 completed runs for each workflow, so old build logs and artifacts do not accumulate indefinitely.
 
 ---
 
@@ -138,7 +152,7 @@ ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 ### Windows
 
 1. Delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
-2. Remove `ai-dikte-startup.cmd` from your Startup folder (`Win+R` -> `shell:startup`).
+2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` → `shell:startup`).
 3. Remove the AI Dikte install directory from your User PATH if desired.
 
 ### Linux
