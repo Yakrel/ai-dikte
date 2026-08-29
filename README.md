@@ -35,7 +35,7 @@ The app uses `gemini-3.5-transcribe-live` with:
 - manual activity boundaries matching the two-press toggle workflow
 - optional custom vocabulary for names and technical terms
 
-Google's Live Transcription API receives raw 16-bit PCM mono audio at 16 kHz. Only the finalized transcript is injected into the active field.
+Google's Live Transcription API receives raw 16-bit PCM mono audio at 16 kHz. Finalized speech segments are preserved and combined before the completed transcription is injected into the active field.
 
 ---
 
@@ -51,14 +51,15 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-This installer:
-1. Installs required Python modules (`websockets`, `sounddevice`, `keyboard`, `pystray`, `pillow`).
-2. Configures silent background startup via Windows Startup (`shell:startup`).
-3. Runs interactive `setup` to configure your Google AI API key and preferred hotkey (default: `win+z` or `alt+z`).
+The installer downloads the latest runtime-tested standalone `ai-dikte-windows.exe` from GitHub Releases, installs it under `%LOCALAPPDATA%\Programs\AI-Dikte`, puts the `ai-dikte` launcher first in the user PATH, creates a hidden Startup launcher, then runs `setup` and `doctor`. Python and pip are not required for the normal Windows installation.
+
+If GitHub Releases is temporarily unavailable, the installer can fall back to a Python/source installation when Python is already installed.
 
 #### Standalone Executable (.exe)
 
-You can also download the pre-built `ai-dikte-windows.exe` directly from the [GitHub Releases / Actions](../../releases) page without installing Python.
+Every successful push to `main` refreshes the **Latest Windows Build** GitHub Release with a newly built and runtime-tested `ai-dikte-windows.exe`. Tags matching `v*` additionally create normal versioned releases.
+
+The Windows CI validates both the packaged version command and a frozen-runtime self-test that imports the actual Windows dependencies (`websockets`, `sounddevice`, `pystray`, and Pillow), checks the fixed `Win+Z` configuration, and verifies the direct `SendInput` backend before publishing the binary.
 
 ---
 
@@ -110,26 +111,39 @@ Example configuration:
 
 - `mode`: `SMART` or `VERBATIM`.
 - `output_driver`: `auto`, `sendinput` (Windows), `kwtype` / `wtype` (Linux).
-- `hotkey`: `win+z`, `alt+z`, `ctrl+alt+z`, etc. (used by Windows background daemon).
+- `hotkey`: fixed to `win+z` on Windows. Linux desktop bindings remain `Meta+Z`.
 - `custom_vocabulary`: supports up to 1000 domain-specific terms.
 
 ---
 
 ## Usage
 
-- **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` (or your configured hotkey) once to start recording, speak, and press it again to finish.
+- **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` once to start recording, speak, and press it again to finish.
 - **Linux**: Press `Meta+Z` once to start recording, speak, and press it again to finish.
 
 ### Commands
 
 ```bash
 ai-dikte toggle            # Toggle dictation (start/stop)
-ai-dikte daemon            # Run background hotkey listener & system tray (Windows/Linux)
-ai-dikte setup             # Configure API key, hotkey, and preferences
+ai-dikte daemon            # Run background hotkey listener & system tray
+ai-dikte setup             # Configure API key and preferences
 ai-dikte doctor            # Run diagnostic checks
 ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
 ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 ```
+
+Windows standalone diagnostics also support:
+
+```powershell
+ai-dikte --version
+ai-dikte --self-test
+```
+
+---
+
+## CI Maintenance
+
+GitHub Actions artifacts are retained for 7 days. A scheduled cleanup workflow runs daily and keeps only the newest 5 completed runs for each workflow, so old build logs and artifacts do not accumulate indefinitely.
 
 ---
 
@@ -137,8 +151,9 @@ ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
 
 ### Windows
 
-1. Delete `%APPDATA%\ai-dikte` and `%LOCALAPPDATA%\ai-dikte`.
-2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` -> `shell:startup`).
+1. Delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
+2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` → `shell:startup`).
+3. Remove the AI Dikte install directory from your User PATH if desired.
 
 ### Linux
 
