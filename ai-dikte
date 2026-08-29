@@ -11,11 +11,11 @@ import base64
 import getpass
 import json
 import os
+import queue
 import shutil
 import signal
 import subprocess
 import sys
-import queue
 import tempfile
 import threading
 import time
@@ -24,25 +24,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-_GLOBAL_TRAY_ICON: Any = None
 # Platform detection
 IS_WINDOWS = sys.platform == "win32"
-
-# Ensure console attachment if run from CLI, and UTF-8 output on Windows
-if IS_WINDOWS:
-    try:
-        import ctypes
-        ATTACH_PARENT_PROCESS = -1
-        kernel32 = ctypes.windll.kernel32
-        kernel32.AttachConsole.restype = ctypes.c_int
-        kernel32.AttachConsole.argtypes = [ctypes.c_int]
-        kernel32.AttachConsole(ATTACH_PARENT_PROCESS)
-        if sys.stdout is None or getattr(sys.stdout, "closed", False):
-            sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-        if sys.stderr is None or getattr(sys.stderr, "closed", False):
-            sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 try:
     import websockets
@@ -53,9 +36,10 @@ try:
     import sounddevice  # type: ignore
 except ImportError:  # pragma: no cover
     sounddevice = None
+
 if IS_WINDOWS:
-    import msvcrt
     import ctypes
+    import msvcrt
     from ctypes import wintypes
 else:
     import fcntl
@@ -68,7 +52,7 @@ DEFAULT_HOTKEY = "win+z" if IS_WINDOWS else "SUPER + Z"
 AUDIO_RATE = 16000
 AUDIO_CHANNELS = 1
 SD_AUDIO_FORMAT = "int16"  # sounddevice PortAudio format
-PW_AUDIO_FORMAT = "s16"    # pw-record PipeWire format
+PW_AUDIO_FORMAT = "s16"  # pw-record PipeWire format
 AUDIO_CHUNK_BYTES = 3200  # 100 ms: 1600 frames * 2 bytes (16-bit PCM)
 WS_ENDPOINT = (
     "wss://generativelanguage.googleapis.com/ws/"
@@ -104,6 +88,9 @@ HYPR_MARKER_END_CONF = "# <<< ai-dikte <<<"
 HYPR_BINDING_LUA = 'o.bind("SUPER + Z", "AI Dikte", "/usr/bin/ai-dikte-toggle")'
 HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/ai-dikte-toggle"
 
+_GLOBAL_TRAY_ICON: Any = None
+_GLOBAL_OSD: Any = None  # WindowsOSD, initialized lazily
+
 
 def ensure_runtime() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -113,8 +100,9 @@ def ensure_runtime() -> None:
         except OSError:
             pass
 
+
 def log_session_event(msg: str) -> None:
-    """Append timestamped log entry to session.log for debugging."""
+    """Append non-sensitive diagnostic metadata to session.log."""
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -224,13 +212,32 @@ class WindowsOSD:
             bg_color = "#181825"
             root.configure(bg=bg_color)
 
-            frame = tk.Frame(root, bg=bg_color, padx=16, pady=10, highlightbackground="#313244", highlightthickness=1)
+            frame = tk.Frame(
+                root,
+                bg=bg_color,
+                padx=16,
+                pady=10,
+                highlightbackground="#313244",
+                highlightthickness=1,
+            )
             frame.pack()
 
-            dot_label = tk.Label(frame, text="●", font=("Segoe UI", 15, "bold"), fg="#f38ba8", bg=bg_color)
+            dot_label = tk.Label(
+                frame,
+                text="●",
+                font=("Segoe UI", 15, "bold"),
+                fg="#f38ba8",
+                bg=bg_color,
+            )
             dot_label.pack(side=tk.LEFT, padx=(0, 8))
 
-            text_label = tk.Label(frame, text="", font=("Segoe UI", 10, "bold"), fg="#cdd6f4", bg=bg_color)
+            text_label = tk.Label(
+                frame,
+                text="",
+                font=("Segoe UI", 10, "bold"),
+                fg="#cdd6f4",
+                bg=bg_color,
+            )
             text_label.pack(side=tk.LEFT)
 
             def apply_noactivate():
@@ -244,7 +251,9 @@ class WindowsOSD:
                     WS_EX_TOPMOST = 0x00000008
                     current_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     ctypes.windll.user32.SetWindowLongW(
-                        hwnd, GWL_EXSTYLE, current_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+                        hwnd,
+                        GWL_EXSTYLE,
+                        current_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                     )
                 except Exception:
                     pass
@@ -292,7 +301,17 @@ class WindowsOSD:
             pass
 
 
-_GLOBAL_OSD: WindowsOSD | None = WindowsOSD() if IS_WINDOWS else None
+def get_windows_osd() -> WindowsOSD | None:
+    """Initialize the OSD only when a Windows notification is actually shown."""
+    global _GLOBAL_OSD
+    if not IS_WINDOWS:
+        return None
+    if _GLOBAL_OSD is None:
+        try:
+            _GLOBAL_OSD = WindowsOSD()
+        except Exception:
+            return None
+    return _GLOBAL_OSD
 
 
 def notify(
@@ -304,33 +323,31 @@ def notify(
     config = load_config(required=False)
     notify_mode = str(config.get("notify_mode", "all")).strip().lower()
 
-    if urgency != "critical" and event_type != "error":
-        if notify_mode == "none":
-            return
+    if urgency != "critical" and event_type != "error" and notify_mode == "none":
+        return
 
     if IS_WINDOWS:
-        if _GLOBAL_OSD is not None:
+        osd = get_windows_osd()
+        if osd is not None:
             if event_type == "start":
-                _GLOBAL_OSD.show("Dinleniyor...", "#f38ba8")
+                osd.show("Dinleniyor...", "#f38ba8")
             elif event_type == "transcribing":
-                _GLOBAL_OSD.show("Metne dönüştürülüyor...", "#f9e2af")
+                osd.show("Metne dönüştürülüyor...", "#f9e2af")
             elif event_type == "finish":
-                _GLOBAL_OSD.show("Yazıldı ✨", "#a6e3a1", auto_hide_ms=1200)
+                osd.show("Yazıldı ✨", "#a6e3a1", auto_hide_ms=1200)
             elif event_type == "error":
-                _GLOBAL_OSD.show(f"Hata: {message[:35]}", "#f38ba8", auto_hide_ms=3000)
+                osd.show(f"Hata: {message[:35]}", "#f38ba8", auto_hide_ms=3000)
             else:
-                _GLOBAL_OSD.show(message, "#89b4fa", auto_hide_ms=2000)
+                osd.show(message, "#89b4fa", auto_hide_ms=2000)
             return
 
         if _GLOBAL_TRAY_ICON is not None and getattr(_GLOBAL_TRAY_ICON, "visible", False):
             try:
                 _GLOBAL_TRAY_ICON.notify(message, title)
-                return
             except Exception:
                 pass
         return
 
-    # Linux notify-send
     if not shutil.which("notify-send"):
         return
     subprocess.run(
@@ -340,8 +357,9 @@ def notify(
         check=False,
     )
 
+
 def fail(message: str, code: int = 1) -> None:
-    notify("AI Dikte — Error", message, "critical")
+    notify("AI Dikte — Error", message, "critical", event_type="error")
     print(f"[ERROR] {message}", file=sys.stderr)
     raise SystemExit(code)
 
@@ -410,6 +428,10 @@ def config_output_driver(config: dict[str, Any]) -> str:
 
 
 def config_hotkey(config: dict[str, Any]) -> str:
+    # Win+Z is intentionally fixed on Windows because it must override the
+    # Windows 11 Snap Layout shortcut using the low-level hook.
+    if IS_WINDOWS:
+        return "win+z"
     value = str(config.get("hotkey", DEFAULT_HOTKEY)).strip()
     return value or DEFAULT_HOTKEY
 
@@ -421,11 +443,7 @@ def setup() -> None:
     if not key:
         fail("API key cannot be empty.")
 
-    hotkey = str(existing.get("hotkey", DEFAULT_HOTKEY)).strip()
-    if IS_WINDOWS:
-        user_hotkey = input(f"Hotkey for dictation (default '{hotkey}'): ").strip()
-        if user_hotkey:
-            hotkey = user_hotkey
+    hotkey = "win+z" if IS_WINDOWS else str(existing.get("hotkey", DEFAULT_HOTKEY)).strip()
 
     config = dict(existing)
     config.update(
@@ -552,16 +570,31 @@ def output_text_windows(text: str) -> str:
     ctypes.windll.user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
 
     utf16_bytes = text.encode("utf-16le")
-    code_units = [int.from_bytes(utf16_bytes[i : i + 2], "little") for i in range(0, len(utf16_bytes), 2)]
+    code_units = [
+        int.from_bytes(utf16_bytes[i : i + 2], "little")
+        for i in range(0, len(utf16_bytes), 2)
+    ]
 
     inputs = []
     for code in code_units:
         inp_down = INPUT(type=INPUT_KEYBOARD)
-        inp_down.ki = KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE, time=0, dwExtraInfo=0)
+        inp_down.ki = KEYBDINPUT(
+            wVk=0,
+            wScan=code,
+            dwFlags=KEYEVENTF_UNICODE,
+            time=0,
+            dwExtraInfo=0,
+        )
         inputs.append(inp_down)
 
         inp_up = INPUT(type=INPUT_KEYBOARD)
-        inp_up.ki = KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, time=0, dwExtraInfo=0)
+        inp_up.ki = KEYBDINPUT(
+            wVk=0,
+            wScan=code,
+            dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+            time=0,
+            dwExtraInfo=0,
+        )
         inputs.append(inp_up)
 
     if inputs:
@@ -719,7 +752,9 @@ def pid_alive(pid: int) -> bool:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         SYNCHRONIZE = 0x00100000
         handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            False,
+            pid,
         )
         if not handle:
             return False
@@ -749,7 +784,9 @@ def session_matches(pid: int) -> bool:
         return False
 
     args = [os.fsdecode(arg) for arg in cmdline if arg]
-    return "_live-session" in args and any(Path(arg).name in ("ai-dikte", "gemini-dikte") for arg in args)
+    return "_live-session" in args and any(
+        Path(arg).name in ("ai-dikte", "gemini-dikte") for arg in args
+    )
 
 
 def clear_runtime_state() -> None:
@@ -764,25 +801,27 @@ class WindowsSessionController:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = "idle"  # "idle" | "starting" | "recording" | "transcribing"
+        self.state = "idle"  # idle | starting | recording | transcribing
         self.stop_event: threading.Event | None = None
         self.session_thread: threading.Thread | None = None
 
     def toggle(self) -> None:
         with self.lock:
             if self.state in ("starting", "recording"):
-                # Second Win+Z press -> signal stop
                 if self.stop_event and not self.stop_event.is_set():
                     self.state = "transcribing"
                     self.stop_event.set()
                     play_audio_cue("stop")
-                    notify("AI Dikte", "Metne dönüştürülüyor...", event_type="transcribing")
-                return
-            elif self.state == "transcribing":
-                # Rapid toggle while transcribing -> ignore
+                    notify(
+                        "AI Dikte",
+                        "Metne dönüştürülüyor...",
+                        event_type="transcribing",
+                    )
                 return
 
-            # First Win+Z press -> start in-process dictation session
+            if self.state == "transcribing":
+                return
+
             self.state = "starting"
             self.stop_event = threading.Event()
             play_audio_cue("start")
@@ -793,6 +832,7 @@ class WindowsSessionController:
                 daemon=True,
             )
             self.session_thread.start()
+
     def _session_worker(self, stop_evt: threading.Event) -> None:
         try:
             asyncio.run(
@@ -802,7 +842,7 @@ class WindowsSessionController:
                 )
             )
         except Exception as exc:
-            log_session_event(f"Session worker exception: {exc}\n{traceback.format_exc()}")
+            log_session_event(f"Session worker exception: {type(exc).__name__}: {exc}")
             notify("AI Dikte — Error", str(exc), "critical", event_type="error")
             play_audio_cue("error")
             print(f"[ERROR] Live session failed: {exc}", file=sys.stderr)
@@ -817,6 +857,7 @@ class WindowsSessionController:
         with self.lock:
             if self.state == "starting":
                 self.state = "recording"
+
     def get_state(self) -> str:
         with self.lock:
             return self.state
@@ -880,14 +921,19 @@ def toggle() -> None:
     pid = read_pid()
     if pid and session_matches(pid):
         if STOP_FILE.exists():
-            notify("AI Dikte", "Previous transcription is still finishing", event_type="info")
+            notify(
+                "AI Dikte",
+                "Previous transcription is still finishing",
+                event_type="info",
+            )
             return
         request_stop()
         return
 
     clear_runtime_state()
-    play_audio_cue("start")
     start_live_session()
+
+
 class SoundDeviceStreamRecorder:
     """Asynchronous audio capture using sounddevice RawInputStream."""
 
@@ -917,6 +963,7 @@ class SoundDeviceStreamRecorder:
             callback=self._callback,
         )
         self.stream.start()
+
     async def read(self) -> bytes:
         return await self.queue.get()
 
@@ -934,6 +981,7 @@ class SoundDeviceStreamRecorder:
 async def stop_recorder(process: asyncio.subprocess.Process | None) -> None:
     if process is None or process.returncode is not None:
         return
+
     if IS_WINDOWS:
         try:
             process.terminate()
@@ -992,7 +1040,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
         raise RuntimeError("Python websockets module is missing.")
 
     url = f"{WS_ENDPOINT}?key={quote(api_key, safe='')}"
-    log_session_event(f"Connecting to Gemini Live WebSocket: models/{MODEL}...")
+    log_session_event(f"Connecting to Gemini Live WebSocket: models/{MODEL}")
     try:
         websocket = await websockets.connect(
             url,
@@ -1003,7 +1051,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
             max_size=4 * 1024 * 1024,
         )
     except Exception as exc:
-        log_session_event(f"Connection failed: {exc}")
+        log_session_event(f"Connection failed: {type(exc).__name__}: {exc}")
         raise RuntimeError(f"Could not connect to Gemini Live API: {exc}") from exc
 
     input_transcription: dict[str, Any] = {
@@ -1025,7 +1073,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
         }
     }
     await websocket.send(json.dumps(setup_message))
-    log_session_event(f"Sent setup message: {json.dumps(setup_message)}")
+    log_session_event("Sent Gemini setup message.")
 
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
@@ -1042,43 +1090,75 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
                 raise RuntimeError(
                     f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
                 ) from exc
-            raise RuntimeError(f"Gemini Live API connection closed during setup ({code}): {reason}") from exc
+            raise RuntimeError(
+                f"Gemini Live API connection closed during setup ({code}): {reason}"
+            ) from exc
 
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8", errors="replace")
-        log_session_event(f"Setup response: {raw.strip()}")
         message = json.loads(raw)
         error = parse_server_error(message)
         if error:
             await websocket.close()
             raise RuntimeError(error)
         if "setupComplete" in message:
+            log_session_event("Gemini setup complete.")
             return websocket
 
     await websocket.close()
     raise RuntimeError("Gemini Live API setup timed out.")
+
+
 async def send_audio(websocket, chunk: bytes) -> None:
+    """Send raw 16 kHz PCM using the current Live API realtimeInput.audio field."""
     message = {
         "realtimeInput": {
-            "mediaChunks": [
-                {
-                    "data": base64.b64encode(chunk).decode("ascii"),
-                    "mimeType": f"audio/pcm;rate={AUDIO_RATE}",
-                }
-            ]
+            "audio": {
+                "data": base64.b64encode(chunk).decode("ascii"),
+                "mimeType": f"audio/pcm;rate={AUDIO_RATE}",
+            }
         }
     }
     await websocket.send(json.dumps(message))
 
+
+def merge_final_segment(segments: list[str], text: str) -> None:
+    """Append a finalized speech segment without duplicating cumulative updates."""
+    text = text.strip()
+    if not text:
+        return
+
+    if not segments:
+        segments.append(text)
+        return
+
+    previous = segments[-1]
+    if text == previous:
+        return
+    if text.startswith(previous):
+        segments[-1] = text
+        return
+    if previous.startswith(text):
+        return
+
+    joined = " ".join(segments)
+    if joined.endswith(text):
+        return
+
+    segments.append(text)
+
+
 async def receive_transcriptions(
-    websocket, finals: asyncio.Queue[str], turn_complete_event: asyncio.Event
+    websocket,
+    transcripts: asyncio.Queue[tuple[str, str]],
+    turn_complete_event: asyncio.Event,
 ) -> None:
-    """Drain Live API messages continuously and retain finalized/interim transcripts."""
+    """Drain Live API messages while keeping finalized and interim text separate."""
     try:
         async for raw in websocket:
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8", errors="replace")
-            log_session_event(f"Gemini WS msg: {raw.strip()}")
+
             message = json.loads(raw)
             error = parse_server_error(message)
             if error:
@@ -1092,12 +1172,15 @@ async def receive_transcriptions(
             interim_text = str(interim.get("text", "")).strip()
 
             if final_text:
-                log_session_event(f"Captured transcription text: '{final_text}' (final=True)")
-                await finals.put(final_text)
-                turn_complete_event.set()
+                log_session_event(
+                    f"Captured finalized transcription segment ({len(final_text)} chars)."
+                )
+                await transcripts.put(("final", final_text))
             elif interim_text:
-                log_session_event(f"Captured transcription text: '{interim_text}' (final=False)")
-                await finals.put(interim_text)
+                log_session_event(
+                    f"Captured interim transcription update ({len(interim_text)} chars)."
+                )
+                await transcripts.put(("interim", interim_text))
 
             if content.get("turnComplete") or content.get("generationComplete"):
                 log_session_event("Received turnComplete / generationComplete signal.")
@@ -1111,7 +1194,9 @@ async def receive_transcriptions(
                 f"Gemini API authentication failed (code {code}): invalid API key or quota exceeded."
             ) from exc
         if code and code != 1000:
-            raise RuntimeError(f"Gemini WebSocket connection closed unexpectedly ({code}): {reason}") from exc
+            raise RuntimeError(
+                f"Gemini WebSocket connection closed unexpectedly ({code}): {reason}"
+            ) from exc
 
 
 async def raise_if_receiver_failed(receiver_task: asyncio.Task[None]) -> None:
@@ -1120,48 +1205,58 @@ async def raise_if_receiver_failed(receiver_task: asyncio.Task[None]) -> None:
 
 
 async def collect_final_transcript(
-    finals_queue: asyncio.Queue[str],
+    transcripts: asyncio.Queue[tuple[str, str]],
     receiver_task: asyncio.Task[None],
     turn_complete_event: asyncio.Event,
 ) -> str:
-    latest_transcript = ""
-    deadline = time.monotonic() + 3.5
+    """Collect all finalized speech segments, with interim text only as a fallback."""
+    final_segments: list[str] = []
+    latest_interim = ""
+    deadline = time.monotonic() + 4.0
+    last_update = time.monotonic()
 
     while time.monotonic() < deadline:
         await raise_if_receiver_failed(receiver_task)
-        if turn_complete_event.is_set():
-            while not finals_queue.empty():
-                try:
-                    t = finals_queue.get_nowait()
-                    if t:
-                        latest_transcript = t
-                except Exception:
-                    break
-            if latest_transcript:
-                break
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
 
-        timeout = 0.25 if latest_transcript else min(1.5, max(0.05, remaining))
         try:
-            text = await asyncio.wait_for(finals_queue.get(), timeout=timeout)
+            kind, text = await asyncio.wait_for(
+                transcripts.get(),
+                timeout=min(0.25, max(0.05, remaining)),
+            )
         except asyncio.TimeoutError:
             await raise_if_receiver_failed(receiver_task)
-            if turn_complete_event.is_set() or latest_transcript:
-                break
-            break
+            quiet_for = time.monotonic() - last_update
 
-        if text:
-            latest_transcript = text
-            if turn_complete_event.is_set():
+            if turn_complete_event.is_set() and final_segments and transcripts.empty():
                 break
+            if final_segments and quiet_for >= 0.75 and transcripts.empty():
+                break
+            if not final_segments and latest_interim and quiet_for >= 1.0 and transcripts.empty():
+                break
+            continue
 
-    log_session_event(f"Collected final transcript: '{latest_transcript}'")
-    if not latest_transcript:
-        raise RuntimeError("Gemini returned no final transcription.")
-    return latest_transcript.strip()
+        last_update = time.monotonic()
+        if kind == "final":
+            merge_final_segment(final_segments, text)
+            latest_interim = ""
+        elif kind == "interim":
+            latest_interim = text.strip()
+
+    result = " ".join(final_segments).strip()
+    if not result:
+        result = latest_interim.strip()
+
+    log_session_event(
+        f"Collected transcription ({len(result)} chars, {len(final_segments)} final segment(s))."
+    )
+    if not result:
+        raise RuntimeError("Gemini returned no transcription.")
+    return result
+
 
 async def live_session(
     stop_checker: Any = None,
@@ -1176,11 +1271,17 @@ async def live_session(
 
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-        SESSION_LOG.write_text(f"=== AI Dikte Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n", encoding="utf-8")
+        SESSION_LOG.write_text(
+            f"=== AI Dikte Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n",
+            encoding="utf-8",
+        )
     except Exception:
         pass
 
-    log_session_event(f"Session started. Platform: {'Windows' if IS_WINDOWS else 'Linux'}, Model: {MODEL}, Language: {config_language(config)}")
+    log_session_event(
+        f"Session started. Platform: {'Windows' if IS_WINDOWS else 'Linux'}, "
+        f"Model: {MODEL}, Language: {config_language(config)}"
+    )
 
     def is_stop_requested() -> bool:
         if stop_checker is not None:
@@ -1193,7 +1294,7 @@ async def live_session(
     websocket = None
     connect_task: asyncio.Task[Any] | None = None
     receiver_task: asyncio.Task[None] | None = None
-    finals_queue: asyncio.Queue[str] = asyncio.Queue()
+    transcripts: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     turn_complete_event = asyncio.Event()
 
     use_sounddevice = IS_WINDOWS or not shutil.which("pw-record")
@@ -1203,11 +1304,18 @@ async def live_session(
         if use_sounddevice:
             sd_recorder = SoundDeviceStreamRecorder()
             sd_recorder.start(loop)
-            log_session_event(f"SoundDevice recorder started. Format: {SD_AUDIO_FORMAT}, Rate: {AUDIO_RATE}Hz")
+            log_session_event(
+                f"SoundDevice recorder started. Format: {SD_AUDIO_FORMAT}, Rate: {AUDIO_RATE}Hz"
+            )
         else:
+            # Keep the proven Linux PipeWire path explicit: raw signed 16-bit,
+            # mono, 16 kHz PCM. Gemini receives exactly what the MIME type says.
             with ERROR_FILE.open("wb") as error_handle:
                 recorder_proc = await asyncio.create_subprocess_exec(
                     "pw-record",
+                    "--raw",
+                    f"--rate={AUDIO_RATE}",
+                    f"--channels={AUDIO_CHANNELS}",
                     f"--format={PW_AUDIO_FORMAT}",
                     "-",
                     stdin=asyncio.subprocess.DEVNULL,
@@ -1226,11 +1334,13 @@ async def live_session(
                 READY_FILE.chmod(0o600)
             except OSError:
                 pass
+
         if on_ready is not None:
             try:
                 on_ready()
             except Exception:
                 pass
+
         notify("AI Dikte", "Recording started", event_type="start")
         connect_task = asyncio.create_task(open_live_websocket(api_key, config))
         buffered_audio: list[bytes] = []
@@ -1253,12 +1363,16 @@ async def live_session(
 
         websocket = await connect_task
         receiver_task = asyncio.create_task(
-            receive_transcriptions(websocket, finals_queue, turn_complete_event)
+            receive_transcriptions(websocket, transcripts, turn_complete_event)
         )
         await websocket.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
-        log_session_event(f"Sent activityStart. Flushing {len(buffered_audio)} buffered audio chunks...")
+        log_session_event(
+            f"Sent activityStart. Flushing {len(buffered_audio)} buffered audio chunks."
+        )
+
         has_sent_audio = False
         chunks_sent = 0
+
         for chunk in buffered_audio:
             await raise_if_receiver_failed(receiver_task)
             await send_audio(websocket, chunk)
@@ -1279,28 +1393,30 @@ async def live_session(
             has_sent_audio = True
             chunks_sent += 1
 
-        log_session_event(f"Stop detected. Total chunks streamed during active recording: {chunks_sent}")
+        log_session_event(
+            f"Stop detected. Total chunks streamed during active recording: {chunks_sent}"
+        )
 
-        # Drain any remaining audio in sounddevice recorder queue before stopping
         if sd_recorder is not None:
+            # Stop capture first so the callback cannot race with the queue drain.
+            sd_recorder.stop()
             drain_count = 0
             while not sd_recorder.queue.empty():
                 try:
                     chunk = sd_recorder.queue.get_nowait()
-                    if chunk:
-                        await raise_if_receiver_failed(receiver_task)
-                        await send_audio(websocket, chunk)
-                        has_sent_audio = True
-                        chunks_sent += 1
-                        drain_count += 1
-                except Exception:
+                except asyncio.QueueEmpty:
                     break
-            log_session_event(f"Drained {drain_count} pending audio chunks from queue.")
-            sd_recorder.stop()
+                if chunk:
+                    await raise_if_receiver_failed(receiver_task)
+                    await send_audio(websocket, chunk)
+                    has_sent_audio = True
+                    chunks_sent += 1
+                    drain_count += 1
+            log_session_event(f"Drained {drain_count} pending SoundDevice audio chunks.")
         elif recorder_proc is not None:
             await stop_recorder(recorder_proc)
 
-        # Drain remaining PipeWire buffer
+        # Drain remaining PipeWire stdout after the recorder has stopped.
         if recorder_proc is not None and recorder_proc.stdout is not None:
             while True:
                 chunk = await recorder_proc.stdout.read(AUDIO_CHUNK_BYTES)
@@ -1308,23 +1424,33 @@ async def live_session(
                     break
                 await raise_if_receiver_failed(receiver_task)
                 await send_audio(websocket, chunk)
+                has_sent_audio = True
                 chunks_sent += 1
 
         if not has_sent_audio:
             dummy_chunk = b"\x00\x00" * 1600
             await send_audio(websocket, dummy_chunk)
-            log_session_event("Sent dummy silence chunk for empty recording guard.")
+            log_session_event("Sent one silence chunk for empty-recording guard.")
 
         await websocket.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
-        log_session_event(f"Sent activityEnd. Total chunks sent: {chunks_sent}. Collecting final transcript...")
-        text = await collect_final_transcript(finals_queue, receiver_task, turn_complete_event)
-        log_session_event(f"Injecting text ({len(text)} chars): '{text}'")
+        log_session_event(
+            f"Sent activityEnd. Total chunks sent: {chunks_sent}. Collecting transcript."
+        )
+
+        text = await collect_final_transcript(
+            transcripts,
+            receiver_task,
+            turn_complete_event,
+        )
+        log_session_event(f"Injecting transcription ({len(text)} chars).")
         driver = output_text(text)
         log_session_event(f"Text injected successfully via {driver}.")
         play_audio_cue("finish")
         notify("AI Dikte", f"Text ready ({driver})", event_type="finish")
     except Exception as exc:
-        log_session_event(f"EXCEPTION in live_session: {exc}\n{traceback.format_exc()}")
+        log_session_event(
+            f"EXCEPTION in live_session: {type(exc).__name__}: {exc}"
+        )
         raise
     finally:
         if sd_recorder is not None:
@@ -1356,32 +1482,6 @@ async def live_session(
                 pass
         clear_runtime_state()
         log_session_event("Session ended and cleaned up.")
-def parse_hotkey_matcher(hotkey_str: str) -> tuple[bool, bool, bool, bool, int] | None:
-    """Parse hotkey string into (req_win, req_ctrl, req_alt, req_shift, target_vk)."""
-    parts = [p.strip().lower() for p in hotkey_str.replace(" ", "").split("+") if p.strip()]
-    if not parts:
-        return None
-    req_win = any(p in ("win", "windows", "super", "meta") for p in parts)
-    req_ctrl = any(p in ("ctrl", "control") for p in parts)
-    req_alt = any(p in ("alt", "menu") for p in parts)
-    req_shift = any(p in ("shift",) for p in parts)
-    target_vk = 0
-    for p in parts:
-        if p in ("win", "windows", "super", "meta", "ctrl", "control", "alt", "menu", "shift"):
-            continue
-        if len(p) == 1:
-            target_vk = ord(p.upper())
-        elif p.startswith("f") and p[1:].isdigit():
-            vk_num = int(p[1:])
-            if 1 <= vk_num <= 24:
-                target_vk = 0x6F + vk_num
-        elif p == "space":
-            target_vk = 0x20
-        elif p == "pause":
-            target_vk = 0x13
-        elif p == "capslock":
-            target_vk = 0x14
-    return (req_win, req_ctrl, req_alt, req_shift, target_vk) if target_vk != 0 else None
 
 
 _GLOBAL_HOOK_CB = None
@@ -1392,11 +1492,12 @@ _GLOBAL_CONTROL_WORKER_THREAD: threading.Thread | None = None
 
 
 def setup_windows_keyboard_hook(callback) -> None:
-    """Installs WH_KEYBOARD_LL hook that strictly enqueues toggle events to a background worker."""
+    """Install the Win+Z low-level hook and keep blocking work off the hook thread."""
     global _GLOBAL_HOOK_CB, _GLOBAL_HOOK_HANDLE, _GLOBAL_HOOK_THREAD
     global _GLOBAL_TOGGLE_QUEUE, _GLOBAL_CONTROL_WORKER_THREAD
 
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
 
     WH_KEYBOARD_LL = 13
     WM_KEYDOWN = 0x0100
@@ -1406,7 +1507,11 @@ def setup_windows_keyboard_hook(callback) -> None:
     VK_LWIN = 0x5B
     VK_RWIN = 0x5C
     VK_Z = 0x5A
+    VK_NONAME = 0xFC
     LLKHF_INJECTED = 0x00000010
+    KEYEVENTF_KEYUP = 0x0002
+    INPUT_KEYBOARD = 1
+    ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else wintypes.DWORD
 
     class KBDLLHOOKSTRUCT(ctypes.Structure):
         _fields_ = [
@@ -1414,35 +1519,120 @@ def setup_windows_keyboard_hook(callback) -> None:
             ("scanCode", wintypes.DWORD),
             ("flags", wintypes.DWORD),
             ("time", wintypes.DWORD),
-            ("dwExtraInfo", ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else wintypes.DWORD),
+            ("dwExtraInfo", ULONG_PTR),
         ]
 
-    HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ULONG_PTR),
+        ]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [
+            ("uMsg", wintypes.DWORD),
+            ("wParamL", wintypes.WORD),
+            ("wParamH", wintypes.WORD),
+        ]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ULONG_PTR),
+        ]
+
+    class INPUT_UNION(ctypes.Union):
+        _fields_ = [
+            ("mi", MOUSEINPUT),
+            ("ki", KEYBDINPUT),
+            ("hi", HARDWAREINPUT),
+        ]
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("_u",)
+        _fields_ = [
+            ("type", wintypes.DWORD),
+            ("_u", INPUT_UNION),
+        ]
+
+    HOOKPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_longlong,
+        ctypes.c_int,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    )
 
     user32.SetWindowsHookExW.restype = wintypes.HHOOK
-    user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+    user32.SetWindowsHookExW.argtypes = [
+        ctypes.c_int,
+        HOOKPROC,
+        wintypes.HINSTANCE,
+        wintypes.DWORD,
+    ]
     user32.UnhookWindowsHookEx.restype = wintypes.BOOL
     user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
     user32.CallNextHookEx.restype = ctypes.c_longlong
-    user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+    user32.CallNextHookEx.argtypes = [
+        wintypes.HHOOK,
+        ctypes.c_int,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    ]
     user32.GetAsyncKeyState.restype = wintypes.SHORT
     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
     user32.GetKeyState.restype = wintypes.SHORT
     user32.GetKeyState.argtypes = [ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+
+    def send_dummy_key() -> None:
+        """Mark Win as part of a chord without using deprecated keybd_event."""
+        events = (INPUT * 2)()
+        events[0].type = INPUT_KEYBOARD
+        events[0].ki = KEYBDINPUT(
+            wVk=VK_NONAME,
+            wScan=0,
+            dwFlags=0,
+            time=0,
+            dwExtraInfo=0,
+        )
+        events[1].type = INPUT_KEYBOARD
+        events[1].ki = KEYBDINPUT(
+            wVk=VK_NONAME,
+            wScan=0,
+            dwFlags=KEYEVENTF_KEYUP,
+            time=0,
+            dwExtraInfo=0,
+        )
+        user32.SendInput(2, events, ctypes.sizeof(INPUT))
 
     _GLOBAL_TOGGLE_QUEUE = queue.SimpleQueue()
 
     def control_worker():
+        assert _GLOBAL_TOGGLE_QUEUE is not None
         while True:
             evt = _GLOBAL_TOGGLE_QUEUE.get()
             if evt == "toggle":
-                log_session_event("HotKey Win+Z received -> invoking toggle()...")
+                log_session_event("Hotkey Win+Z received; invoking toggle.")
                 try:
                     callback()
                 except Exception as exc:
-                    log_session_event(f"Toggle callback failed: {exc}\n{traceback.format_exc()}")
+                    log_session_event(
+                        f"Toggle callback failed: {type(exc).__name__}: {exc}"
+                    )
                     print(f"[ERROR] Toggle handler failed: {exc}", file=sys.stderr)
-    _GLOBAL_CONTROL_WORKER_THREAD = threading.Thread(target=control_worker, daemon=True)
+
+    _GLOBAL_CONTROL_WORKER_THREAD = threading.Thread(
+        target=control_worker,
+        daemon=True,
+    )
     _GLOBAL_CONTROL_WORKER_THREAD.start()
 
     win_state = False
@@ -1450,9 +1640,11 @@ def setup_windows_keyboard_hook(callback) -> None:
 
     def hook_callback(nCode: int, wParam: int, lParam: int) -> int:
         nonlocal win_state, last_enqueue_time
+
         if nCode >= 0:
             kbd = KBDLLHOOKSTRUCT.from_address(lParam)
-            # Ignore synthetic/injected events to prevent feedback loops
+
+            # Ignore our own SendInput events and text injection events.
             if kbd.flags & LLKHF_INJECTED:
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
@@ -1460,9 +1652,11 @@ def setup_windows_keyboard_hook(callback) -> None:
             is_down = wParam in (WM_KEYDOWN, WM_SYSKEYDOWN)
             is_up = wParam in (WM_KEYUP, WM_SYSKEYUP)
 
-            # Track physical Win key state transitions
             if vk in (VK_LWIN, VK_RWIN):
-                win_state = is_down
+                if is_down:
+                    win_state = True
+                elif is_up:
+                    win_state = False
             elif vk == VK_Z:
                 win_active = (
                     win_state
@@ -1473,17 +1667,18 @@ def setup_windows_keyboard_hook(callback) -> None:
                 )
                 if win_active:
                     if is_down:
-                        # Mask Windows key so Start Menu does not open on Win release
-                        user32.keybd_event(0xFF, 0, 0, 0)
-                        user32.keybd_event(0xFF, 0, 2, 0)
+                        # A harmless VK_NONAME chord prevents the Start menu
+                        # from treating the later Win release as a bare Win tap.
+                        send_dummy_key()
 
                         now = time.monotonic()
                         if now - last_enqueue_time > 0.35:
                             last_enqueue_time = now
-                            _GLOBAL_TOGGLE_QUEUE.put_nowait("toggle")
-                        return 1  # Suppress Z keydown from Windows Snap Layouts
-                    elif is_up:
-                        return 1  # Suppress Z keyup as well
+                            assert _GLOBAL_TOGGLE_QUEUE is not None
+                            _GLOBAL_TOGGLE_QUEUE.put("toggle")
+                        return 1
+                    if is_up:
+                        return 1
 
         return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
@@ -1500,42 +1695,64 @@ def setup_windows_keyboard_hook(callback) -> None:
         ]
 
     ready_evt = threading.Event()
+    hook_error: list[int] = []
 
     def hook_worker():
         global _GLOBAL_HOOK_HANDLE
-        _GLOBAL_HOOK_HANDLE = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _GLOBAL_HOOK_CB, None, 0)
+
+        _GLOBAL_HOOK_HANDLE = user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL,
+            _GLOBAL_HOOK_CB,
+            None,
+            0,
+        )
+        if not _GLOBAL_HOOK_HANDLE:
+            hook_error.append(int(kernel32.GetLastError()))
+            ready_evt.set()
+            return
+
         ready_evt.set()
         msg = MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
+
         if _GLOBAL_HOOK_HANDLE:
             user32.UnhookWindowsHookEx(_GLOBAL_HOOK_HANDLE)
+            _GLOBAL_HOOK_HANDLE = None
 
     _GLOBAL_HOOK_THREAD = threading.Thread(target=hook_worker, daemon=True)
     _GLOBAL_HOOK_THREAD.start()
-    ready_evt.wait(timeout=2.0)
+
+    if not ready_evt.wait(timeout=2.0):
+        raise RuntimeError("Timed out while installing the Windows keyboard hook.")
+    if not _GLOBAL_HOOK_HANDLE:
+        code = hook_error[0] if hook_error else 0
+        raise RuntimeError(f"Could not install the Windows keyboard hook (Win32 error {code}).")
 
 
 def run_daemon() -> None:
     """Run in background with global hotkey and system tray icon."""
     global _GLOBAL_TRAY_ICON
+
     config = load_config()
     hotkey = config_hotkey(config)
 
-    print(f"[*] Starting AI Dikte daemon...")
+    print("[*] Starting AI Dikte daemon...")
     print(f"[*] Dictation hotkey: {hotkey}")
 
     if IS_WINDOWS:
         setup_windows_keyboard_hook(toggle)
-        print(f"[OK] Global Windows hook registered for: Win+Z")
+        print("[OK] Global Windows hook registered for: Win+Z")
     else:
         try:
             import keyboard
+
             keyboard.add_hotkey(hotkey, toggle)
             print(f"[OK] Global hotkey '{hotkey}' registered.")
         except Exception as exc:
             fail(f"Could not register hotkey '{hotkey}': {exc}")
+
     try:
         from PIL import Image, ImageDraw
         import pystray
@@ -1564,7 +1781,10 @@ def run_daemon() -> None:
                 cmd = [sys.executable, subcmd]
             else:
                 cmd = [sys.executable, str(Path(__file__).resolve()), subcmd]
-            subprocess.Popen(cmd, creationflags=0x08000000 if IS_WINDOWS else 0)
+            subprocess.Popen(
+                cmd,
+                creationflags=0x08000000 if IS_WINDOWS else 0,
+            )
 
         menu = pystray.Menu(
             pystray.MenuItem("Toggle Dikte", on_toggle_clicked, default=True),
@@ -1576,7 +1796,7 @@ def run_daemon() -> None:
         tray_icon = pystray.Icon(
             "ai-dikte",
             images["blue"],
-            f"AI Dikte — Hazır (Win+Z)" if IS_WINDOWS else f"AI Dikte — Hazır ({hotkey})",
+            "AI Dikte — Hazır (Win+Z)" if IS_WINDOWS else f"AI Dikte — Hazır ({hotkey})",
             menu,
         )
         _GLOBAL_TRAY_ICON = tray_icon
@@ -1607,6 +1827,7 @@ def run_daemon() -> None:
                             new_state = ("yellow", "AI Dikte — Başlatılıyor...")
                     else:
                         new_state = ("blue", f"AI Dikte — Hazır ({hotkey})")
+
                 if new_state != current_state and tray_icon:
                     current_state = new_state
                     try:
@@ -1621,12 +1842,16 @@ def run_daemon() -> None:
         print("[OK] System Tray icon active.")
         tray_icon.run()
     except ImportError:
-        print("[INFO] pystray/Pillow not installed. Running headless hotkey listener (Press Ctrl+C to quit).")
+        print(
+            "[INFO] pystray/Pillow not installed. "
+            "Running headless hotkey listener (Press Ctrl+C to quit)."
+        )
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n[*] Daemon stopped.")
+
 
 def doctor() -> None:
     config = load_config(required=False)
@@ -1652,14 +1877,20 @@ def doctor() -> None:
             "api-key": bool(str(config.get("api_key", "")).strip()),
             "direct-typing": bool(driver),
         }
+
     for name, ok in checks.items():
-        suffix = f" ({driver})" if name in ("direct-typing", "direct-typing (SendInput)") and driver else ""
+        suffix = (
+            f" ({driver})"
+            if name in ("direct-typing", "direct-typing (SendInput)") and driver
+            else ""
+        )
         status_mark = "[OK]" if ok else "[FAIL]"
         print(f"{status_mark} {name}{suffix}")
+
     print(f"i desktop/os: {desktop}")
     print(f"i model: {MODEL}")
     if IS_WINDOWS:
-        print(f"i hotkey: {config_hotkey(config)}")
+        print("i hotkey: win+z")
 
     if not IS_WINDOWS and desktop == "hyprland":
         target, _, start_marker, _ = hyprland_shortcut_target()
@@ -1674,7 +1905,10 @@ def doctor() -> None:
                 )
             except OSError:
                 pass
-        print(f"{'[OK]' if installed else '[FAIL]'} Meta+Z Hyprland binding ({target.name})")
+        print(
+            f"{'[OK]' if installed else '[FAIL]'} "
+            f"Meta+Z Hyprland binding ({target.name})"
+        )
 
     if not all(checks.values()):
         raise SystemExit(1)
@@ -1688,12 +1922,12 @@ def main() -> None:
         try:
             asyncio.run(live_session())
         except Exception as exc:
-            notify("AI Dikte — Error", str(exc), "critical")
+            notify("AI Dikte — Error", str(exc), "critical", event_type="error")
             print(f"[ERROR] {exc}", file=sys.stderr)
             clear_runtime_state()
         return
 
-    if command == "daemon" or command == "run":
+    if command in ("daemon", "run"):
         run_daemon()
         return
 

@@ -26,7 +26,7 @@ source=(
   "kwtype-${_kwtype_commit}.tar.gz::https://github.com/Sporif/KWtype/archive/${_kwtype_commit}.tar.gz"
 )
 sha256sums=(
-  '2ae424a5de6984dd2cbf1c0ce6b031fe19b582c085de576f50d1184b7597f246'
+  'c28c3bb8dcac1daea4193d795bdfe5ff8201bb4847722ed9f1546c16665453bb'
   '3f307d6506708e7e64884289ae88d7543f690dc9f4fdda2a5b239c1783cd5233'
   'bc9078179cb885b376f3fd137e20e17359cab66dc1670ffd1393a84aea453f9e'
   'f8719185a1f3d2a8ec0bf8507b1476e1a0f37cd10328402661f0cd2748d855d3'

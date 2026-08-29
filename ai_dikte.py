@@ -7,11 +7,14 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+
+
 def init_windows_console() -> None:
     if sys.platform != "win32":
         return
     try:
         import ctypes
+
         ATTACH_PARENT_PROCESS = -1
         kernel32 = ctypes.windll.kernel32
         kernel32.AttachConsole.restype = ctypes.c_int
@@ -24,9 +27,13 @@ def init_windows_console() -> None:
     except Exception:
         pass
 
+
 init_windows_console()
+
 VERSION = "0.1.0"
 _DAEMON_MUTEX_HANDLE = None
+
+
 def bundled_script_path() -> Path:
     """Return the real ai-dikte script in source and PyInstaller builds."""
     if getattr(sys, "frozen", False):
@@ -38,20 +45,16 @@ def bundled_script_path() -> Path:
         return bundle_dir / "ai-dikte"
     return Path(__file__).resolve().parent / "ai-dikte"
 
-def normalize_frozen_child_argv() -> None:
-    """Fix child commands spawned by the source script when running frozen.
 
-    The shared ai-dikte source launches child Python commands as
-    [sys.executable, __file__, command]. In a PyInstaller build sys.executable is
-    the .exe, so the bundled script path arrives as argv[1]. Strip that path so
-    the frozen entrypoint sees the intended command.
-    """
+def normalize_frozen_child_argv() -> None:
+    """Fix child commands spawned by the source script when running frozen."""
     if not getattr(sys, "frozen", False) or len(sys.argv) < 3:
         return
 
     candidate = Path(sys.argv[1])
     if candidate.name in {"ai-dikte", "ai_dikte.py"} or str(candidate).endswith("ai-dikte"):
         sys.argv = [sys.argv[0], *sys.argv[2:]]
+
 
 def acquire_windows_daemon_mutex(command: str | None) -> bool:
     """Ensure only one background hotkey daemon runs in a Windows user session."""
@@ -80,7 +83,7 @@ def acquire_windows_daemon_mutex(command: str | None) -> bool:
 
 
 def start_windows_daemon_background(script_path: Path) -> None:
-    """Start the daemon detached from the first-run console window."""
+    """Start the daemon without creating a visible console window."""
     if sys.platform != "win32":
         return
 
@@ -91,6 +94,7 @@ def start_windows_daemon_background(script_path: Path) -> None:
         cmd = [sys.executable, "daemon"]
     else:
         cmd = [sys.executable, str(script_path), "daemon"]
+
     subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
@@ -99,6 +103,7 @@ def start_windows_daemon_background(script_path: Path) -> None:
         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
         close_fds=False,
     )
+
 
 def windows_first_run_setup(script_path: Path) -> bool:
     """Make a directly downloaded Windows EXE useful on first double-click."""
@@ -111,12 +116,12 @@ def windows_first_run_setup(script_path: Path) -> bool:
         return False
 
     print("AI Dikte first-time setup")
-    print("Enter your Google AI API key and choose the global dictation hotkey.")
+    print("Enter your Google AI API key. The Windows dictation hotkey is Win+Z.")
     namespace["setup"]()
     namespace["doctor"]()
     start_windows_daemon_background(script_path)
     print("[OK] AI Dikte is configured and the background hotkey listener has started.")
-    print("You can close this window and use the configured hotkey (default: Win+Z).")
+    print("You can close this window and use Win+Z.")
     return True
 
 
@@ -139,14 +144,6 @@ def runtime_self_test() -> int:
             failures.append("sounddevice.RawInputStream unavailable")
     except Exception as exc:  # pragma: no cover - exercised in frozen CI
         failures.append(f"sounddevice: {exc}")
-
-    try:
-        import keyboard
-
-        if not callable(getattr(keyboard, "add_hotkey", None)):
-            failures.append("keyboard.add_hotkey unavailable")
-    except Exception as exc:  # pragma: no cover - exercised in frozen CI
-        failures.append(f"keyboard: {exc}")
 
     try:
         import pystray
@@ -176,6 +173,18 @@ def runtime_self_test() -> int:
                     failures.append(f"Windows output driver mismatch: {driver}")
                 if namespace["output_text_windows"]("") != "sendinput":
                     failures.append("SendInput backend self-test failed")
+                if namespace["config_hotkey"]({}) != "win+z":
+                    failures.append("Windows hotkey must be fixed to win+z")
+
+            merge_final_segment = namespace.get("merge_final_segment")
+            if not callable(merge_final_segment):
+                failures.append("transcript merge helper unavailable")
+            else:
+                segments: list[str] = []
+                merge_final_segment(segments, "Birinci cümle.")
+                merge_final_segment(segments, "İkinci cümle.")
+                if segments != ["Birinci cümle.", "İkinci cümle."]:
+                    failures.append("final transcript segments are not preserved")
         except Exception as exc:  # pragma: no cover - exercised in frozen CI
             failures.append(f"shared runtime: {exc}")
 

@@ -40,13 +40,12 @@ jobs:
         run: |
           pyinstaller `
             --onefile `
-            --noconsole `
+            --console `
             --name "ai-dikte-windows" `
             --add-data "ai-dikte;." `
             --collect-submodules websockets `
             --collect-data _sounddevice_data `
             --hidden-import pystray._win32 `
-            --hidden-import keyboard._winkeyboard `
             --clean `
             ai_dikte.py
 

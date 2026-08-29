@@ -35,7 +35,7 @@ The app uses `gemini-3.5-transcribe-live` with:
 - manual activity boundaries matching the two-press toggle workflow
 - optional custom vocabulary for names and technical terms
 
-Google's Live Transcription API receives raw 16-bit PCM mono audio at 16 kHz. Only the finalized transcript is injected into the active field.
+Google's Live Transcription API receives raw 16-bit PCM mono audio at 16 kHz. Finalized speech segments are preserved and combined before the completed transcription is injected into the active field.
 
 ---
 
@@ -59,7 +59,7 @@ If GitHub Releases is temporarily unavailable, the installer can fall back to a 
 
 Every successful push to `main` refreshes the **Latest Windows Build** GitHub Release with a newly built and runtime-tested `ai-dikte-windows.exe`. Tags matching `v*` additionally create normal versioned releases.
 
-The Windows CI validates both the packaged version command and a frozen-runtime self-test that imports the actual Windows dependencies (`websockets`, `sounddevice`, `keyboard`, `pystray`, and Pillow) before publishing the binary.
+The Windows CI validates both the packaged version command and a frozen-runtime self-test that imports the actual Windows dependencies (`websockets`, `sounddevice`, `pystray`, and Pillow), checks the fixed `Win+Z` configuration, and verifies the direct `SendInput` backend before publishing the binary.
 
 ---
 
@@ -111,14 +111,14 @@ Example configuration:
 
 - `mode`: `SMART` or `VERBATIM`.
 - `output_driver`: `auto`, `sendinput` (Windows), `kwtype` / `wtype` (Linux).
-- `hotkey`: `win+z`, `alt+z`, `ctrl+alt+z`, etc. (used by Windows background daemon).
+- `hotkey`: fixed to `win+z` on Windows. Linux desktop bindings remain `Meta+Z`.
 - `custom_vocabulary`: supports up to 1000 domain-specific terms.
 
 ---
 
 ## Usage
 
-- **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` (or your configured hotkey) once to start recording, speak, and press it again to finish.
+- **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` once to start recording, speak, and press it again to finish.
 - **Linux**: Press `Meta+Z` once to start recording, speak, and press it again to finish.
 
 ### Commands
@@ -126,7 +126,7 @@ Example configuration:
 ```bash
 ai-dikte toggle            # Toggle dictation (start/stop)
 ai-dikte daemon            # Run background hotkey listener & system tray
-ai-dikte setup             # Configure API key, hotkey, and preferences
+ai-dikte setup             # Configure API key and preferences
 ai-dikte doctor            # Run diagnostic checks
 ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
 ai-dikte shortcut-remove   # Remove Hyprland shortcut (Linux)
