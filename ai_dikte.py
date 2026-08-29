@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 
 VERSION = "0.1.0"
+_DAEMON_MUTEX_HANDLE = None
 
 
 def bundled_script_path() -> Path:
@@ -32,6 +34,69 @@ def normalize_frozen_child_argv() -> None:
     candidate = Path(sys.argv[1])
     if candidate.name in {"ai-dikte", "ai_dikte.py"}:
         sys.argv = [sys.argv[0], *sys.argv[2:]]
+
+
+def acquire_windows_daemon_mutex(command: str | None) -> bool:
+    """Ensure only one background hotkey daemon runs in a Windows user session."""
+    global _DAEMON_MUTEX_HANDLE
+
+    if sys.platform != "win32" or command not in {"daemon", "run"}:
+        return True
+
+    import ctypes
+
+    ERROR_ALREADY_EXISTS = 183
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, "Local\\AI-Dikte-Daemon")
+    if not handle:
+        print("[ERROR] Could not create Windows daemon mutex.", file=sys.stderr)
+        return False
+
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        print("[INFO] AI Dikte daemon is already running.")
+        return False
+
+    _DAEMON_MUTEX_HANDLE = handle
+    return True
+
+
+def start_windows_daemon_background(script_path: Path) -> None:
+    """Start the daemon detached from the first-run console window."""
+    if sys.platform != "win32":
+        return
+
+    CREATE_NO_WINDOW = 0x08000000
+    DETACHED_PROCESS = 0x00000008
+    subprocess.Popen(
+        [sys.executable, str(script_path), "daemon"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+        close_fds=False,
+    )
+
+
+def windows_first_run_setup(script_path: Path) -> bool:
+    """Make a directly downloaded Windows EXE useful on first double-click."""
+    if sys.platform != "win32" or len(sys.argv) != 1:
+        return False
+
+    namespace = runpy.run_path(str(script_path), run_name="_ai_dikte_first_run")
+    config = namespace["load_config"](required=False)
+    if str(config.get("api_key", "")).strip():
+        return False
+
+    print("AI Dikte first-time setup")
+    print("Enter your Google AI API key and choose the global dictation hotkey.")
+    namespace["setup"]()
+    namespace["doctor"]()
+    start_windows_daemon_background(script_path)
+    print("[OK] AI Dikte is configured and the background hotkey listener has started.")
+    print("You can close this window and use the configured hotkey (default: Win+Z).")
+    return True
 
 
 def runtime_self_test() -> int:
@@ -118,6 +183,13 @@ def main() -> None:
     if not script_path.is_file():
         print(f"[ERROR] Could not find bundled ai-dikte script: {script_path}", file=sys.stderr)
         raise SystemExit(1)
+
+    if windows_first_run_setup(script_path):
+        return
+
+    command = sys.argv[1] if len(sys.argv) > 1 else None
+    if not acquire_windows_daemon_mutex(command):
+        return
 
     runpy.run_path(str(script_path), run_name="__main__")
 
