@@ -40,7 +40,7 @@ jobs:
         run: |
           pyinstaller `
             --onefile `
-            --console `
+            --noconsole `
             --name "ai-dikte-windows" `
             --add-data "ai-dikte;." `
             --collect-submodules websockets `

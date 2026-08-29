@@ -7,18 +7,36 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+def init_windows_console() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ATTACH_PARENT_PROCESS = -1
+        kernel32 = ctypes.windll.kernel32
+        kernel32.AttachConsole.restype = ctypes.c_int
+        kernel32.AttachConsole.argtypes = [ctypes.c_int]
+        kernel32.AttachConsole(ATTACH_PARENT_PROCESS)
+        if sys.stdout is None or getattr(sys.stdout, "closed", False):
+            sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+        if sys.stderr is None or getattr(sys.stderr, "closed", False):
+            sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
+init_windows_console()
 VERSION = "0.1.0"
 _DAEMON_MUTEX_HANDLE = None
-
-
 def bundled_script_path() -> Path:
     """Return the real ai-dikte script in source and PyInstaller builds."""
     if getattr(sys, "frozen", False):
-        bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        exe_dir = Path(sys.executable).resolve().parent
+        override = exe_dir / "ai-dikte"
+        if override.is_file():
+            return override
+        bundle_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
         return bundle_dir / "ai-dikte"
     return Path(__file__).resolve().parent / "ai-dikte"
-
 
 def normalize_frozen_child_argv() -> None:
     """Fix child commands spawned by the source script when running frozen.
@@ -32,9 +50,8 @@ def normalize_frozen_child_argv() -> None:
         return
 
     candidate = Path(sys.argv[1])
-    if candidate.name in {"ai-dikte", "ai_dikte.py"}:
+    if candidate.name in {"ai-dikte", "ai_dikte.py"} or str(candidate).endswith("ai-dikte"):
         sys.argv = [sys.argv[0], *sys.argv[2:]]
-
 
 def acquire_windows_daemon_mutex(command: str | None) -> bool:
     """Ensure only one background hotkey daemon runs in a Windows user session."""
@@ -69,15 +86,19 @@ def start_windows_daemon_background(script_path: Path) -> None:
 
     CREATE_NO_WINDOW = 0x08000000
     DETACHED_PROCESS = 0x00000008
+
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "daemon"]
+    else:
+        cmd = [sys.executable, str(script_path), "daemon"]
     subprocess.Popen(
-        [sys.executable, str(script_path), "daemon"],
+        cmd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
         close_fds=False,
     )
-
 
 def windows_first_run_setup(script_path: Path) -> bool:
     """Make a directly downloaded Windows EXE useful on first double-click."""

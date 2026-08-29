@@ -8,3 +8,6 @@ build/
 *.pkg.tar.xz
 *.pkg.tar.gz
 *.tar.gz
+dist/
+*.spec
+.venv/
