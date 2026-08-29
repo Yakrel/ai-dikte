@@ -71,6 +71,18 @@ shell.Run Chr(34) & "$escapedExecutable" & Chr(34) & " daemon", 0, False
     Write-Host "${BOLD}${BLUE}==>${NC} Created hidden Startup launcher: $startupVbs"
 }
 
+function Start-HiddenStartupLauncher {
+    if (-not (Test-Path $startupVbs)) {
+        throw "Startup launcher was not created: $startupVbs"
+    }
+
+    $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+    Write-Host "${BOLD}${BLUE}==>${NC} Starting background hotkey listener..."
+    Start-Process -FilePath $wscript -ArgumentList "`"$startupVbs`"" -WindowStyle Hidden | Out-Null
+    Start-Sleep -Milliseconds 500
+    Write-Host "${GREEN}[OK]${NC} Background listener start requested."
+}
+
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 $installedStandalone = $false
 
@@ -117,8 +129,10 @@ if ($installedStandalone) {
         Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
     }
 
+    Start-HiddenStartupLauncher
+
     Write-Host ""
-    Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte will start automatically when you sign in."
+    Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running now and will start automatically when you sign in."
     Write-Host "Command: ${BOLD}ai-dikte${NC}"
     exit 0
 }
@@ -181,5 +195,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
 }
 
+Start-HiddenStartupLauncher
+
 Write-Host ""
-Write-Host "${GREEN}${BOLD}Setup complete!${NC} Python fallback installation is active."
+Write-Host "${GREEN}${BOLD}Setup complete!${NC} Python fallback installation is active, running now, and configured to start automatically at sign-in."
