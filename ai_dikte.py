@@ -3,10 +3,36 @@
 
 from __future__ import annotations
 
+# Keep imports used by the bundled `ai-dikte` data script visible to PyInstaller.
+# The shared runtime is executed with runpy, so PyInstaller cannot discover its
+# imports by statically analysing that file when it is added via --add-data.
+import asyncio
+import base64
+import getpass
+import json
+import os
+import queue
 import runpy
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import threading
+import time
+import traceback
 from pathlib import Path
+from urllib.parse import quote
+
+# These imports are also performed dynamically by the shared Windows runtime.
+# Importing them here ensures the frozen build contains the corresponding
+# standard-library modules and Tk runtime used by the OSD.
+if sys.platform == "win32":
+    import ctypes
+    import msvcrt
+    import tkinter  # noqa: F401
+    import winsound  # noqa: F401
+    from ctypes import wintypes  # noqa: F401
 
 
 def init_windows_console() -> None:
