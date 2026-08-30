@@ -70,7 +70,7 @@ sudo pacman -S --needed --noconfirm base-devel tar
 # Hyprland/Omarchy needs only wtype. KDE gets a dedicated KWtype package below.
 if [ "$DESKTOP_KIND" = "hyprland" ]; then
     echo -e "${BOLD}${BLUE}==>${NC} Installing Hyprland typing backend..."
-    sudo pacman -S --needed --asdeps --noconfirm wtype
+    sudo pacman -S --needed --noconfirm wtype
 fi
 
 echo -e "${BOLD}${BLUE}==>${NC} Downloading latest source from GitHub (git-free)..."
@@ -81,9 +81,10 @@ cd "$TEMP_DIR"
 if [ "$DESKTOP_KIND" = "kde" ]; then
     echo -e "${BOLD}${BLUE}==>${NC} Building KDE typing backend (KWtype)..."
     # --rmdeps removes build-only packages pulled in by this helper build.
-    # --asdeps marks the backend as an AI Dikte dependency rather than a user package.
+    # KWtype itself stays explicitly installed so orphan cleanup cannot remove
+    # the active text-injection backend behind AI Dikte's back.
     makepkg -p PKGBUILD.kwtype --syncdeps --rmdeps --install --clean \
-        --noconfirm --needed --asdeps
+        --noconfirm --needed
 fi
 
 echo -e "${BOLD}${BLUE}==>${NC} Building and installing AI Dikte..."
