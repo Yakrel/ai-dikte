@@ -79,12 +79,16 @@ curl -fsSL "https://github.com/Yakrel/ai-dikte/archive/refs/heads/main.tar.gz" |
 cd "$TEMP_DIR"
 
 if [ "$DESKTOP_KIND" = "kde" ]; then
-    echo -e "${BOLD}${BLUE}==>${NC} Building KDE typing backend (KWtype)..."
-    # --rmdeps removes build-only packages pulled in by this helper build.
-    # KWtype itself stays explicitly installed so orphan cleanup cannot remove
-    # the active text-injection backend behind AI Dikte's back.
-    makepkg -p PKGBUILD.kwtype --syncdeps --rmdeps --install --clean \
-        --noconfirm --needed
+    if command -v kwtype >/dev/null 2>&1; then
+        echo -e "${BOLD}${BLUE}==>${NC} Existing KWtype detected; no KDE backend build needed."
+    else
+        echo -e "${BOLD}${BLUE}==>${NC} Building KDE typing backend (KWtype)..."
+        # --rmdeps removes build-only packages pulled in by this helper build.
+        # KWtype itself stays explicitly installed so orphan cleanup cannot remove
+        # the active text-injection backend behind AI Dikte's back.
+        makepkg -p PKGBUILD.kwtype --syncdeps --rmdeps --install --clean \
+            --noconfirm --needed
+    fi
 fi
 
 echo -e "${BOLD}${BLUE}==>${NC} Building and installing AI Dikte..."
