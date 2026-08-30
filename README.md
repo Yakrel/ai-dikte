@@ -74,7 +74,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/Yakrel/ai-dikte/main/ins
 The installer detects the active desktop before installing anything extra:
 
 - **Hyprland / Omarchy** → installs `wtype` only.
-- **KDE Plasma Wayland / CachyOS KDE** → builds the pinned `KWtype` backend as the separate `ai-dikte-kwtype` package. Its build-only dependencies are removed automatically after the build.
+- **KDE Plasma Wayland / CachyOS KDE** → reuses `kwtype` if it is already available; otherwise it builds the pinned backend as the separate `ai-dikte-kwtype` package. Build-only dependencies are removed automatically afterward.
 
 The selected backend stays explicitly installed so a generic orphan cleanup cannot silently remove AI Dikte's active typing backend. The base `ai-dikte` package itself contains no bundled typing backend and depends only on the common runtime pieces used by dictation.
 
@@ -97,7 +97,7 @@ KDE Plasma Wayland:
 git clone https://github.com/Yakrel/ai-dikte.git
 cd ai-dikte
 sudo pacman -S --needed base-devel
-makepkg -p PKGBUILD.kwtype -sric --needed
+command -v kwtype >/dev/null || makepkg -p PKGBUILD.kwtype -sric --needed
 makepkg -si
 ai-dikte setup
 ai-dikte doctor
@@ -192,6 +192,8 @@ rm -rf ~/.config/ai-dikte
 On KDE Plasma:
 
 ```bash
-sudo pacman -Rns ai-dikte ai-dikte-kwtype
+sudo pacman -Rns ai-dikte
 rm -rf ~/.config/ai-dikte
 ```
+
+If the installer created `ai-dikte-kwtype`, remove that package too. If you already had another `kwtype` package, leave it installed if you still use it elsewhere.
