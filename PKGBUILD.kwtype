@@ -1,0 +1,31 @@
+pkgname=ai-dikte-kwtype
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='KDE Plasma Wayland typing backend for AI Dikte'
+arch=('x86_64')
+url='https://github.com/Sporif/KWtype'
+license=('MIT')
+provides=('kwtype')
+depends=(
+  'kwayland'
+  'libxkbcommon'
+  'qt6-base'
+  'wayland'
+)
+makedepends=(
+  'meson'
+  'ninja'
+  'pkgconf'
+)
+_kwtype_commit='ac2c3864aaacc31afc252d88d1d4b669270f2f44'
+source=("kwtype-${_kwtype_commit}.tar.gz::https://github.com/Sporif/KWtype/archive/${_kwtype_commit}.tar.gz")
+sha256sums=('ec6f1fa5128835dabbbb3f819ba5aea318eb6e81a8ec47d9fb2868af152c7b41')
+
+build() {
+  arch-meson "KWtype-${_kwtype_commit}" build
+  meson compile -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+}
