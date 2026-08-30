@@ -19,14 +19,27 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          kwayland libnotify libxkbcommon pipewire-audio python python-websockets
-          qt6-base wayland wtype meson ninja pkgconf
+          libnotify pipewire-audio python python-websockets wtype
+          kwayland libxkbcommon qt6-base wayland meson ninja pkgconf
 
       - name: Check Python syntax
         run: python -m py_compile ai-dikte
 
-      - name: Build package
+      - name: Build minimal base package
         run: |
           useradd --create-home builder
           chown -R builder:builder .
           runuser -u builder -- makepkg --noconfirm --cleanbuild
+          base_pkg="$(runuser -u builder -- makepkg --packagelist | head -n1)"
+          if bsdtar -tf "$base_pkg" | grep -q '^usr/bin/kwtype$'; then
+            echo "Base package must not bundle KWtype"
+            exit 1
+          fi
+
+      - name: Build KDE backend package
+        run: |
+          rm -rf src pkg
+          chown -R builder:builder .
+          runuser -u builder -- makepkg -p PKGBUILD.kwtype --noconfirm --cleanbuild
+          kde_pkg="$(runuser -u builder -- makepkg -p PKGBUILD.kwtype --packagelist | head -n1)"
+          bsdtar -tf "$kde_pkg" | grep -q '^usr/bin/kwtype$'
