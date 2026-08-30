@@ -5,7 +5,8 @@ pkgdesc='KDE Plasma Wayland typing backend for AI Dikte'
 arch=('x86_64')
 url='https://github.com/Sporif/KWtype'
 license=('MIT')
-provides=('kwtype')
+provides=('kwtype=0.1.0')
+conflicts=('kwtype-git')
 depends=(
   'kwayland'
   'libxkbcommon'
@@ -27,5 +28,8 @@ build() {
 }
 
 package() {
+  local kwtype_dir="KWtype-${_kwtype_commit}"
   DESTDIR="$pkgdir" meson install -C build
+  install -Dm644 "$kwtype_dir/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
