@@ -22,8 +22,10 @@ jobs:
           libnotify pipewire-audio python python-websockets wtype
           kwayland libxkbcommon qt6-base wayland meson ninja pkgconf
 
-      - name: Check Python syntax
-        run: python -m py_compile ai-dikte
+      - name: Check script syntax
+        run: |
+          python -m py_compile ai-dikte
+          bash -n install.sh
 
       - name: Build minimal base package
         run: |
@@ -33,6 +35,10 @@ jobs:
           base_pkg="$(runuser -u builder -- makepkg --packagelist | head -n1)"
           if bsdtar -tf "$base_pkg" | grep -q '^usr/bin/kwtype$'; then
             echo "Base package must not bundle KWtype"
+            exit 1
+          fi
+          if bsdtar -xOf "$base_pkg" .PKGINFO | grep -Eq '^depend = (kwayland|libxkbcommon|qt6-base|wayland|wtype)$'; then
+            echo "Base package contains a desktop-specific dependency"
             exit 1
           fi
 
