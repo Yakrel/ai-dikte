@@ -26,6 +26,27 @@ if ! command -v pacman >/dev/null 2>&1; then
     exit 1
 fi
 
+# Detect the active Wayland desktop so only its required typing backend is installed.
+desktop_env="$(printf '%s %s %s' \
+    "${XDG_CURRENT_DESKTOP:-}" \
+    "${XDG_SESSION_DESKTOP:-}" \
+    "${DESKTOP_SESSION:-}" | tr '[:upper:]' '[:lower:]')"
+
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [[ "$desktop_env" == *hyprland* ]]; then
+    DESKTOP_KIND="hyprland"
+    TYPING_BACKEND="wtype"
+elif [ -n "${KDE_FULL_SESSION:-}" ] || [[ "$desktop_env" == *kde* ]] || [[ "$desktop_env" == *plasma* ]]; then
+    DESKTOP_KIND="kde"
+    TYPING_BACKEND="kwtype"
+else
+    echo -e "${RED}[ERROR]${NC} Unsupported desktop session."
+    echo "AI Dikte currently supports Hyprland/Omarchy and KDE Plasma on Wayland."
+    echo "Detected desktop environment: ${desktop_env:-unknown}"
+    exit 1
+fi
+
+echo -e "${BOLD}${BLUE}==>${NC} Detected ${BOLD}${DESKTOP_KIND}${NC}; using only ${BOLD}${TYPING_BACKEND}${NC} for direct typing."
+
 # Authenticate sudo once upfront and maintain active session
 echo -e "${BOLD}${BLUE}==>${NC} Requesting sudo permissions (one-time prompt)..."
 sudo -v
@@ -41,19 +62,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Install all build & runtime dependencies in a single transaction
-echo -e "${BOLD}${BLUE}==>${NC} Installing required dependencies..."
-sudo pacman -S --needed --noconfirm \
-    base-devel tar meson ninja pkgconf \
-    kwayland libnotify libxkbcommon pipewire-audio python python-websockets \
-    qt6-base wayland wtype
+# makepkg requires the standard Arch build environment. Omarchy already ships
+# base-devel, so --needed makes this a no-op there.
+echo -e "${BOLD}${BLUE}==>${NC} Ensuring the minimal build environment is available..."
+sudo pacman -S --needed --noconfirm base-devel tar
+
+# Hyprland/Omarchy needs only wtype. KDE gets a dedicated KWtype package below.
+if [ "$DESKTOP_KIND" = "hyprland" ]; then
+    echo -e "${BOLD}${BLUE}==>${NC} Installing Hyprland typing backend..."
+    sudo pacman -S --needed --asdeps --noconfirm wtype
+fi
 
 echo -e "${BOLD}${BLUE}==>${NC} Downloading latest source from GitHub (git-free)..."
 curl -fsSL "https://github.com/Yakrel/ai-dikte/archive/refs/heads/main.tar.gz" | tar -xz -C "$TEMP_DIR" --strip-components=1
 
-echo -e "${BOLD}${BLUE}==>${NC} Building and installing package with makepkg..."
 cd "$TEMP_DIR"
-makepkg -si --noconfirm --needed
+
+if [ "$DESKTOP_KIND" = "kde" ]; then
+    echo -e "${BOLD}${BLUE}==>${NC} Building KDE typing backend (KWtype)..."
+    # --rmdeps removes build-only packages pulled in by this helper build.
+    # --asdeps marks the backend as an AI Dikte dependency rather than a user package.
+    makepkg -p PKGBUILD.kwtype --syncdeps --rmdeps --install --clean \
+        --noconfirm --needed --asdeps
+fi
+
+echo -e "${BOLD}${BLUE}==>${NC} Building and installing AI Dikte..."
+makepkg --syncdeps --install --clean --noconfirm --needed
 
 echo -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"
 echo ""
