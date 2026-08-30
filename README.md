@@ -16,13 +16,13 @@ The UI stays toggle-based: press once to start recording, press again to finish,
 
 ## Desktop & OS Support
 
-AI Dikte automatically selects a direct text-injection backend:
+AI Dikte uses one direct text-injection backend for the active desktop:
 
 - **Windows 10 / 11**: Direct Win32 `SendInput` with `KEYEVENTF_UNICODE` (supports full Unicode, Turkish characters `ç, ğ, ı, ö, ş, ü, İ, Ğ...`, and emojis with zero clipboard usage).
 - **KDE Plasma / KWin (Wayland)**: `kwtype`
 - **Hyprland / Omarchy (Wayland)**: `wtype`
 
-In `auto` mode it follows the current desktop/OS and injects directly into the active window. There is intentionally no clipboard fallback.
+The Linux installer detects the current desktop and installs **only the backend that desktop needs**. Hyprland/Omarchy does not install Qt/KWayland/KWtype, while KDE does not install `wtype`. There is intentionally no clipboard fallback.
 
 ---
 
@@ -71,11 +71,33 @@ The Windows CI validates both the packaged version command and a frozen-runtime 
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.sh)"
 ```
 
+The installer detects the active desktop before installing anything extra:
+
+- **Hyprland / Omarchy** → installs `wtype` only.
+- **KDE Plasma Wayland / CachyOS KDE** → reuses `kwtype` if it is already available; otherwise it builds the pinned backend as the separate `ai-dikte-kwtype` package. Build-only dependencies are removed automatically afterward.
+
+The selected backend stays explicitly installed so a generic orphan cleanup cannot silently remove AI Dikte's active typing backend. The base `ai-dikte` package itself contains no bundled typing backend and depends only on the common runtime pieces used by dictation.
+
 #### Manual Installation
+
+Hyprland / Omarchy:
 
 ```bash
 git clone https://github.com/Yakrel/ai-dikte.git
 cd ai-dikte
+sudo pacman -S --needed base-devel wtype
+makepkg -si
+ai-dikte setup
+ai-dikte doctor
+```
+
+KDE Plasma Wayland:
+
+```bash
+git clone https://github.com/Yakrel/ai-dikte.git
+cd ai-dikte
+sudo pacman -S --needed base-devel
+command -v kwtype >/dev/null || makepkg -p PKGBUILD.kwtype -sric --needed
 makepkg -si
 ai-dikte setup
 ai-dikte doctor
@@ -165,9 +187,13 @@ sudo pacman -Rns ai-dikte
 rm -rf ~/.config/ai-dikte
 ```
 
+`wtype` is installed as the selected desktop backend. Remove it separately with `sudo pacman -Rns wtype` only if you do not use it for anything else.
+
 On KDE Plasma:
 
 ```bash
 sudo pacman -Rns ai-dikte
 rm -rf ~/.config/ai-dikte
 ```
+
+If the installer created `ai-dikte-kwtype`, remove that package too. If you already had another `kwtype` package, leave it installed if you still use it elsewhere.
