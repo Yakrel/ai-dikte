@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="60%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect x="60" y="60" width="904" height="904" rx="230" ry="230" fill="url(#bgGrad)" stroke="#ffffff" stroke-opacity="0.25" stroke-width="4"/>
+
+  <!-- AI Sparkles -->
+  <path d="M 762 257 Q 762 282 787 282 Q 762 282 762 307 Q 762 282 737 282 Q 762 282 762 257 Z" fill="#ffffff" transform="scale(3.6) translate(-550,-200)"/>
+  <path d="M 762 257 Q 762 282 787 282 Q 762 282 762 307 Q 762 282 737 282 Q 762 282 762 257 Z" fill="#ffffff" fill-opacity="0.9" transform="scale(1.8) translate(80,-15)"/>
+  <path d="M 762 257 Q 762 282 787 282 Q 762 282 762 307 Q 762 282 737 282 Q 762 282 762 257 Z" fill="#ffffff" fill-opacity="0.85" transform="scale(2.1) translate(-230,170)"/>
+
+  <!-- Microphone Capsule -->
+  <rect x="432" y="322" width="160" height="290" rx="80" ry="80" fill="#ffffff"/>
+  <line x1="452" y1="467" x2="572" y2="467" stroke="#c8d7f5" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Cradle Arc -->
+  <path d="M 380 432 A 132 132 0 0 0 644 432" fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round"/>
+
+  <!-- Stem & Base Stand -->
+  <line x1="512" y1="564" x2="512" y2="659" stroke="#ffffff" stroke-width="28" stroke-linecap="round"/>
+  <line x1="417" y1="659" x2="607" y2="659" stroke="#ffffff" stroke-width="28" stroke-linecap="round"/>
+</svg>

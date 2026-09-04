@@ -32,6 +32,24 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Run runtime contract tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate Windows installer syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ".\install.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Source runtime self-test
         run: python ai_dikte.py --self-test
 
@@ -40,9 +58,11 @@ jobs:
         run: |
           pyinstaller `
             --onefile `
-            --console `
+            --windowed `
             --name "ai-dikte-windows" `
+            --icon "ai-dikte.ico" `
             --add-data "ai-dikte;." `
+            --add-data "ai-dikte.png;." `
             --collect-submodules websockets `
             --collect-data _sounddevice_data `
             --hidden-import pystray._win32 `
@@ -52,21 +72,31 @@ jobs:
       - name: Smoke test frozen executable
         shell: pwsh
         run: |
-          & ".\dist\ai-dikte-windows.exe" --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "Frozen executable version test failed with exit code $LASTEXITCODE"
+          $proc = Start-Process -FilePath ".\dist\ai-dikte-windows.exe" -ArgumentList "--version" -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) {
+            throw "Frozen executable version test failed with exit code $($proc.ExitCode)"
           }
 
-          & ".\dist\ai-dikte-windows.exe" --self-test
-          if ($LASTEXITCODE -ne 0) {
-            throw "Frozen executable runtime self-test failed with exit code $LASTEXITCODE"
+          $proc = Start-Process -FilePath ".\dist\ai-dikte-windows.exe" -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) {
+            throw "Frozen executable runtime self-test failed with exit code $($proc.ExitCode)"
           }
+      - name: Create SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash ".\dist\ai-dikte-windows.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ai-dikte-windows.exe" | Set-Content `
+            -Path ".\dist\ai-dikte-windows.exe.sha256" `
+            -Encoding ascii `
+            -NoNewline
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ai-dikte-windows
-          path: dist/ai-dikte-windows.exe
+          path: |
+            dist/ai-dikte-windows.exe
+            dist/ai-dikte-windows.exe.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -95,23 +125,37 @@ jobs:
 
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             tag="latest"
+            git tag -f "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag" --force
 
-            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" >/dev/null 2>&1; then
-              release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.id')"
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" \
+                dist/ai-dikte-windows.exe \
+                dist/ai-dikte-windows.exe.sha256 \
+                --clobber
+              gh release edit "$tag" \
+                --title "Latest Windows Build" \
+                --notes "Automatically built and runtime-tested from commit $GITHUB_SHA." \
+                --latest
+            else
+              gh release create "$tag" \
+                dist/ai-dikte-windows.exe \
+                dist/ai-dikte-windows.exe.sha256 \
+                --title "Latest Windows Build" \
+                --notes "Automatically built and runtime-tested from commit $GITHUB_SHA." \
+                --latest
             fi
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true
-
-            gh release create "$tag" dist/ai-dikte-windows.exe \
-              --target "$GITHUB_SHA" \
-              --title "Latest Windows Build" \
-              --notes "Automatically built and runtime-tested from the latest main branch commit ($GITHUB_SHA)."
           else
             tag="$GITHUB_REF_NAME"
             if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" dist/ai-dikte-windows.exe --clobber
+              gh release upload "$tag" \
+                dist/ai-dikte-windows.exe \
+                dist/ai-dikte-windows.exe.sha256 \
+                --clobber
             else
-              gh release create "$tag" dist/ai-dikte-windows.exe \
+              gh release create "$tag" \
+                dist/ai-dikte-windows.exe \
+                dist/ai-dikte-windows.exe.sha256 \
                 --title "AI Dikte $tag" \
                 --generate-notes
             fi

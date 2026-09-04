@@ -20,9 +20,14 @@ $installDir = Join-Path $env:LOCALAPPDATA "Programs\AI-Dikte"
 $fallbackDir = Join-Path $env:LOCALAPPDATA "ai-dikte"
 $exePath = Join-Path $installDir "ai-dikte.exe"
 $cmdLauncher = Join-Path $installDir "ai-dikte.cmd"
-$startupFolder = [Environment]::GetFolderPath("Startup")
-$startupVbs = Join-Path $startupFolder "ai-dikte-startup.vbs"
-$legacyStartupCmd = Join-Path $startupFolder "ai-dikte-startup.cmd"
+$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$appName = "AI-Dikte"
+$programsFolder = [Environment]::GetFolderPath("Programs")
+$startMenuLnk = Join-Path $programsFolder "AI Dikte.lnk"
+$runtimeOverride = Join-Path $installDir "ai-dikte"
+$downloadExe = Join-Path $env:TEMP "ai-dikte-windows-$PID.exe"
+$downloadChecksum = "$downloadExe.sha256"
+
 
 function Set-PreferredUserPath {
     param(
@@ -57,30 +62,63 @@ function Set-PreferredUserPath {
     $env:Path = "$Preferred;$env:Path"
 }
 
-function Write-HiddenStartupLauncher {
-    param([Parameter(Mandatory = $true)][string]$Executable)
+function Set-RegistryStartup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string]$Arguments = "daemon"
+    )
 
-    Remove-Item -Path $legacyStartupCmd -Force -ErrorAction SilentlyContinue
-
-    $escapedExecutable = $Executable.Replace('"', '""')
-    $vbs = @"
-Set shell = CreateObject("WScript.Shell")
-shell.Run Chr(34) & "$escapedExecutable" & Chr(34) & " daemon", 0, False
-"@
-    $vbs | Out-File -FilePath $startupVbs -Encoding Unicode -Force
-    Write-Host "${BOLD}${BLUE}==>${NC} Created hidden Startup launcher: $startupVbs"
+    $cmd = "`"$Executable`" $Arguments"
+    Set-ItemProperty -Path $runKey -Name $appName -Value $cmd -Force
+    Write-Host "${BOLD}${BLUE}==>${NC} Configured Windows sign-in startup via Registry: $appName"
 }
 
-function Start-HiddenStartupLauncher {
-    if (-not (Test-Path $startupVbs)) {
-        throw "Startup launcher was not created: $startupVbs"
-    }
+function Remove-LegacyStartupFiles {
+    $startupFolder = [Environment]::GetFolderPath("Startup")
+    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.vbs") -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.cmd") -Force -ErrorAction SilentlyContinue
+}
 
-    $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+function Start-DaemonProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string]$Arguments = "daemon"
+    )
+
     Write-Host "${BOLD}${BLUE}==>${NC} Starting background hotkey listener..."
-    Start-Process -FilePath $wscript -ArgumentList "`"$startupVbs`"" -WindowStyle Hidden | Out-Null
+    Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden | Out-Null
     Start-Sleep -Milliseconds 500
-    Write-Host "${GREEN}[OK]${NC} Background listener start requested."
+    Write-Host "${GREEN}[OK]${NC} Background listener started."
+}
+
+function Write-StartMenuShortcut {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string]$Arguments = "daemon"
+    )
+
+    $wscript = New-Object -ComObject WScript.Shell
+    $shortcut = $wscript.CreateShortcut($startMenuLnk)
+    $shortcut.TargetPath = $Executable
+    $shortcut.Arguments = $Arguments
+    $shortcut.WorkingDirectory = Split-Path $Executable
+    $shortcut.Description = "AI Dikte - Minimal Dictation using Gemini 3.5"
+    $shortcut.IconLocation = "$Executable,0"
+    $shortcut.Save()
+    Write-Host "${BOLD}${BLUE}==>${NC} Created Start Menu shortcut: $startMenuLnk"
+}
+
+function Stop-InstalledDaemon {
+    param([Parameter(Mandatory = $true)][string[]]$ExecutablePaths)
+
+    $processes = Get-CimInstance Win32_Process |
+        Where-Object { $_.ExecutablePath -and $ExecutablePaths -contains $_.ExecutablePath }
+    foreach ($process in $processes) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($process in $processes) {
+        Wait-Process -Id $process.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+    }
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -88,48 +126,86 @@ $installedStandalone = $false
 
 try {
     Write-Host "${BOLD}${BLUE}==>${NC} Looking for the latest standalone Windows release..."
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Yakrel/ai-dikte/releases/latest" -Headers @{ "User-Agent" = "ai-dikte-installer"; "Accept" = "application/vnd.github+json" }
+    $release = Invoke-RestMethod `
+        -Uri "https://api.github.com/repos/Yakrel/ai-dikte/releases/tags/latest" `
+        -Headers @{ "User-Agent" = "ai-dikte-installer"; "Accept" = "application/vnd.github+json" }
 
-    $asset = $release.assets | Where-Object { $_.name -eq "ai-dikte-windows.exe" } | Select-Object -First 1
-    if (-not $asset) {
-        throw "Latest release does not contain ai-dikte-windows.exe"
+    $asset = $release.assets |
+        Where-Object { $_.name -eq "ai-dikte-windows.exe" } |
+        Select-Object -First 1
+    $checksumAsset = $release.assets |
+        Where-Object { $_.name -eq "ai-dikte-windows.exe.sha256" } |
+        Select-Object -First 1
+    if (-not $asset -or -not $checksumAsset) {
+        throw "Latest release is missing the executable or its SHA-256 checksum"
     }
 
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $exePath
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $downloadExe
+    Invoke-WebRequest -Uri $checksumAsset.browser_download_url -OutFile $downloadChecksum
 
+    $checksumText = (Get-Content -Path $downloadChecksum -Raw).Trim()
+    $checksumMatch = [regex]::Match($checksumText, '\A([a-fA-F0-9]{64})(?:\s|$)')
+    if (-not $checksumMatch.Success) {
+        throw "Release checksum file is malformed"
+    }
+    $expectedHash = $checksumMatch.Groups[1].Value.ToLowerInvariant()
+    $actualHash = (Get-FileHash -Path $downloadExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "Standalone executable SHA-256 checksum mismatch"
+    }
+
+    Unblock-File -Path $downloadExe
     Write-Host "${BOLD}${BLUE}==>${NC} Verifying standalone executable..."
-    & $exePath --self-test
-    if ($LASTEXITCODE -ne 0) {
-        throw "Standalone executable self-test failed with exit code $LASTEXITCODE"
+    $verifyProc = Start-Process -FilePath $downloadExe -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
+    if ($verifyProc.ExitCode -ne 0) {
+        throw "Standalone executable self-test failed with exit code $($verifyProc.ExitCode)"
     }
 
+    Stop-InstalledDaemon -ExecutablePaths @($exePath)
+    Move-Item -Path $downloadExe -Destination $exePath -Force
+    Remove-Item -Path $runtimeOverride -Force -ErrorAction SilentlyContinue
     $installedStandalone = $true
-    Write-Host "${GREEN}[OK]${NC} Installed standalone executable: $exePath"
+    Write-Host "${GREEN}[OK]${NC} Installed verified standalone executable: $exePath"
 }
 catch {
-    Remove-Item -Path $exePath -Force -ErrorAction SilentlyContinue
-    Write-Host "${YELLOW}[WARN]${NC} No usable standalone release is available: $($_.Exception.Message)"
-    Write-Host "${YELLOW}[WARN]${NC} Falling back to the Python-based installer path."
+    $downloadError = $_.Exception.Message
+    if (Test-Path $exePath) {
+        Write-Host "${YELLOW}[WARN]${NC} Download failed; checking the existing installation: $downloadError"
+        $checkProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
+        if ($checkProc.ExitCode -eq 0) {
+            $installedStandalone = $true
+            Write-Host "${GREEN}[OK]${NC} Keeping the existing verified standalone executable."
+        }
+    }
+    if (-not $installedStandalone) {
+        Write-Host "${YELLOW}[WARN]${NC} No usable standalone release is available: $downloadError"
+        Write-Host "${YELLOW}[WARN]${NC} Falling back to the Python-based installer path."
+    }
+}
+finally {
+    Remove-Item -Path $downloadExe, $downloadChecksum -Force -ErrorAction SilentlyContinue
 }
 
 if ($installedStandalone) {
     ('@echo off' + "`r`n" + '"%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe" %*') | Out-File -FilePath $cmdLauncher -Encoding ASCII -Force
     Set-PreferredUserPath -Preferred $installDir -Remove @($fallbackDir)
-    Write-HiddenStartupLauncher -Executable $exePath
+    Remove-LegacyStartupFiles
+    Set-RegistryStartup -Executable $exePath -Arguments "daemon"
+    Write-StartMenuShortcut -Executable $exePath -Arguments "daemon"
 
     Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
-    & $exePath setup
-    if ($LASTEXITCODE -ne 0) {
-        throw "AI Dikte setup failed with exit code $LASTEXITCODE"
+    $setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
+    if ($setupProc.ExitCode -ne 0) {
+        throw "AI Dikte setup failed with exit code $($setupProc.ExitCode)"
     }
 
     Write-Host "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-    & $exePath doctor
-    if ($LASTEXITCODE -ne 0) {
+    $doctorProc = Start-Process -FilePath $exePath -ArgumentList "doctor" -Wait -PassThru -NoNewWindow
+    if ($doctorProc.ExitCode -ne 0) {
         Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
     }
 
-    Start-HiddenStartupLauncher
+    Start-DaemonProcess -Executable $exePath -Arguments "daemon"
 
     Write-Host ""
     Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running now and will start automatically when you sign in."
@@ -172,18 +248,9 @@ $pythonwExe = Join-Path (Split-Path $pythonExe) "pythonw.exe"
 if (-not (Test-Path $pythonwExe)) {
     $pythonwExe = $pythonExe
 }
-Remove-Item -Path $legacyStartupCmd -Force -ErrorAction SilentlyContinue
-
-# Python fallback needs the wrapper/script arguments in Startup.
-$escapedPython = $pythonwExe.Replace('"', '""')
-$escapedWrapper = $pyWrapperPath.Replace('"', '""')
-$vbs = @"
-Set shell = CreateObject("WScript.Shell")
-shell.Run Chr(34) & "$escapedPython" & Chr(34) & " " & Chr(34) & "$escapedWrapper" & Chr(34) & " daemon", 0, False
-"@
-$vbs | Out-File -FilePath $startupVbs -Encoding Unicode -Force
-
-Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
+Remove-LegacyStartupFiles
+Set-RegistryStartup -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
+Write-StartMenuShortcut -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
 & $pythonCmd $pyWrapperPath setup
 if ($LASTEXITCODE -ne 0) {
     throw "AI Dikte setup failed with exit code $LASTEXITCODE"
@@ -195,7 +262,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
 }
 
-Start-HiddenStartupLauncher
+Start-DaemonProcess -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
 
 Write-Host ""
 Write-Host "${GREEN}${BOLD}Setup complete!${NC} Python fallback installation is active, running now, and configured to start automatically at sign-in."
