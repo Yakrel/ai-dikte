@@ -51,15 +51,11 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-The installer downloads the latest runtime-tested standalone `ai-dikte-windows.exe` from GitHub Releases, installs it under `%LOCALAPPDATA%\Programs\AI-Dikte`, puts the `ai-dikte` launcher first in the user PATH, creates a hidden Startup launcher, then runs `setup` and `doctor`. Python and pip are not required for the normal Windows installation.
-
-If GitHub Releases is temporarily unavailable, the installer can fall back to a Python/source installation when Python is already installed.
+The installer does **not** build on the local computer. It downloads the `latest` CI-built `ai-dikte-windows.exe` and its SHA-256 checksum, verifies both the checksum and frozen-runtime self-test, then replaces the installed executable under `%LOCALAPPDATA%\Programs\AI-Dikte`. A failed download never deletes a working verified installation. Python and pip are not required for the normal Windows installation; a Python/source fallback is used only when no verified executable is available.
 
 #### Standalone Executable (.exe)
 
-Every successful push to `main` refreshes the **Latest Windows Build** GitHub Release with a newly built and runtime-tested `ai-dikte-windows.exe`. Tags matching `v*` additionally create normal versioned releases.
-
-The Windows CI validates both the packaged version command and a frozen-runtime self-test that imports the actual Windows dependencies (`websockets`, `sounddevice`, `pystray`, and Pillow), checks the fixed `Win+Z` configuration, and verifies the direct `SendInput` backend before publishing the binary.
+Every successful **push** to `main`—not a local commit by itself—runs the Windows CI, executes the runtime contract tests, builds the standalone executable, checks the frozen runtime, emits a SHA-256 checksum, and refreshes the stable **Latest Windows Build** release without deleting the release first. Tags matching `v*` additionally create immutable versioned releases.
 
 ---
 
@@ -109,16 +105,15 @@ ai-dikte doctor
 
 ## Configuration
 
-Persistent configuration file:
+Persistent non-secret configuration:
 
-- **Windows**: `%APPDATA%\ai-dikte\config.json` (e.g. `C:\Users\<User>\AppData\Roaming\ai-dikte\config.json`)
-- **Linux**: `~/.config/ai-dikte/config.json`
+- **Windows**: `%APPDATA%\ai-dikte\config.json`; the Google AI API key is stored separately as `Yakrel/AI-Dikte/GoogleAI` in the current user's Windows Credential Manager.
+- **Linux**: `~/.config/ai-dikte/config.json`; the API key remains in this user-only file.
 
-Example configuration:
+Example Windows configuration:
 
 ```json
 {
-  "api_key": "YOUR_GEMINI_API_KEY",
   "language": "tr-TR",
   "mode": "SMART",
   "hotkey": "win+z",
@@ -127,14 +122,20 @@ Example configuration:
     "Omarchy",
     "Hyprland"
   ],
-  "output_driver": "auto"
+  "output_driver": "auto",
+  "input_device": null,
+  "audio_cue": true,
+  "notify_mode": "all"
 }
 ```
 
 - `mode`: `SMART` or `VERBATIM`.
+- `input_device`: `null` for the system default or the numeric SoundDevice input index selected by Setup.
+- `audio_cue`: enables Windows start/stop/finish sounds.
+- `notify_mode`: `all` or `none`; critical errors remain visible.
 - `output_driver`: `auto`, `sendinput` (Windows), `kwtype` / `wtype` (Linux).
 - `hotkey`: fixed to `win+z` on Windows. Linux desktop bindings remain `Meta+Z`.
-- `custom_vocabulary`: supports up to 1000 domain-specific terms.
+- `custom_vocabulary`: supports up to 1000 unique non-empty terms.
 
 ---
 
@@ -142,6 +143,10 @@ Example configuration:
 
 - **Windows**: Runs in background daemon mode with a System Tray icon. Press `Win+Z` once to start recording, speak, and press it again to finish.
 - **Linux**: Press `Meta+Z` once to start recording, speak, and press it again to finish.
+
+On Windows, right-click the tray icon to configure the validated API key, language, mode, microphone, vocabulary, sounds, notifications, and sign-in startup. The same menu exposes Doctor, current microphone/model status, logs, copyable diagnostics, restart, and exit actions.
+
+Setup validates the exact Gemini Live model connection before replacing the working key or saving any preference. A failed key, quota, model-access, or network check leaves the prior configuration intact.
 
 ### Commands
 
@@ -173,9 +178,10 @@ GitHub Actions artifacts are retained for 7 days. A scheduled cleanup workflow r
 
 ### Windows
 
-1. Delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
-2. Remove `ai-dikte-startup.vbs` from your Startup folder (`Win+R` → `shell:startup`).
-3. Remove the AI Dikte install directory from your User PATH if desired.
+1. Exit AI Dikte from the tray, then delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
+2. Remove `AI-Dikte` from **Windows Settings → Apps → Startup** (or Registry Run key) and delete `AI Dikte.lnk` from your Start Menu.
+3. Open Windows Credential Manager → **Windows Credentials** and remove `Yakrel/AI-Dikte/GoogleAI`.
+4. Remove the AI Dikte install directory from your User PATH if desired.
 
 ### Linux
 

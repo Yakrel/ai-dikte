@@ -31,6 +31,7 @@ if sys.platform == "win32":
     import ctypes
     import msvcrt
     import tkinter  # noqa: F401
+    from tkinter import ttk as _ttk  # noqa: F401
     import winsound  # noqa: F401
     from ctypes import wintypes  # noqa: F401
 
@@ -48,25 +49,32 @@ def init_windows_console() -> None:
         kernel32.AttachConsole(ATTACH_PARENT_PROCESS)
         if sys.stdout is None or getattr(sys.stdout, "closed", False):
             sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+        elif hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
         if sys.stderr is None or getattr(sys.stderr, "closed", False):
             sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+        elif hasattr(sys.stderr, "reconfigure"):
+            try:
+                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     except Exception:
         pass
 
 
 init_windows_console()
 
-VERSION = "0.1.0"
+VERSION = "0.4.0"
 _DAEMON_MUTEX_HANDLE = None
 
 
 def bundled_script_path() -> Path:
-    """Return the real ai-dikte script in source and PyInstaller builds."""
+    """Return the bundled runtime script in frozen and source builds."""
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        override = exe_dir / "ai-dikte"
-        if override.is_file():
-            return override
         bundle_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
         return bundle_dir / "ai-dikte"
     return Path(__file__).resolve().parent / "ai-dikte"
@@ -108,6 +116,15 @@ def acquire_windows_daemon_mutex(command: str | None) -> bool:
     return True
 
 
+def independent_frozen_env() -> dict[str, str] | None:
+    """Start a new one-file app instance with its own extraction directory."""
+    if not getattr(sys, "frozen", False):
+        return None
+    child_env = os.environ.copy()
+    child_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return child_env
+
+
 def start_windows_daemon_background(script_path: Path) -> None:
     """Start the daemon without creating a visible console window."""
     if sys.platform != "win32":
@@ -127,7 +144,8 @@ def start_windows_daemon_background(script_path: Path) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
-        close_fds=False,
+        env=independent_frozen_env(),
+        close_fds=True,
     )
 
 
@@ -137,17 +155,13 @@ def windows_first_run_setup(script_path: Path) -> bool:
         return False
 
     namespace = runpy.run_path(str(script_path), run_name="_ai_dikte_first_run")
-    config = namespace["load_config"](required=False)
-    if str(config.get("api_key", "")).strip():
+    if namespace["load_api_key"](required=False):
         return False
 
-    print("AI Dikte first-time setup")
-    print("Enter your Google AI API key. The Windows dictation hotkey is Win+Z.")
-    namespace["setup"]()
-    namespace["doctor"]()
+    namespace["run_tray_gui_command"]("setup")
+    if not namespace["load_api_key"](required=False):
+        return True
     start_windows_daemon_background(script_path)
-    print("[OK] AI Dikte is configured and the background hotkey listener has started.")
-    print("You can close this window and use Win+Z.")
     return True
 
 
@@ -201,6 +215,26 @@ def runtime_self_test() -> int:
                     failures.append("SendInput backend self-test failed")
                 if namespace["config_hotkey"]({}) != "win+z":
                     failures.append("Windows hotkey must be fixed to win+z")
+                config = namespace["build_setup_config"](
+                    {},
+                    {
+                        "mode": "verbatim",
+                        "custom_vocabulary": [" AI Dikte ", "AI Dikte"],
+                        "input_device": None,
+                    },
+                )
+                if config["mode"] != "VERBATIM":
+                    failures.append("setup mode normalization failed")
+                if config["custom_vocabulary"] != ["AI Dikte"]:
+                    failures.append("setup vocabulary normalization failed")
+                if "api_key" in config:
+                    failures.append("Windows config must not contain an API key")
+                if namespace["tray_child_command"]("setup")[-1] != "_tray-setup":
+                    failures.append("tray setup command routing failed")
+                if not callable(namespace.get("run_tray_gui_command")):
+                    failures.append("tray GUI command unavailable")
+                if not callable(namespace.get("write_windows_api_key")):
+                    failures.append("Windows Credential Manager backend unavailable")
 
             merge_final_segment = namespace.get("merge_final_segment")
             if not callable(merge_final_segment):
