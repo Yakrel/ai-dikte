@@ -19,14 +19,15 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          libnotify pipewire-audio python python-websockets wtype
+          libnotify pipewire-audio python python-websockets tk xorg-server-xvfb xorg-xauth xorg-xwayland wtype
           kwayland libxkbcommon qt6-base wayland meson ninja pkgconf
 
       - name: Check script syntax
         run: |
-          python -m py_compile ai-dikte
+          python -m py_compile ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py
           bash -n install.sh
-          python -m unittest discover -s tests -v
+          sh -n ai-dikte ai-dikte-toggle
+          xvfb-run -a python -m unittest discover -s tests -v
 
       - name: Build minimal base package
         run: |
@@ -34,6 +35,12 @@ jobs:
           chown -R builder:builder .
           runuser -u builder -- makepkg --noconfirm --cleanbuild
           base_pkg="$(runuser -u builder -- makepkg --packagelist | head -n1)"
+          mkdir -p /tmp/ai-dikte-installed
+          bsdtar -xf "$base_pkg" -C /tmp/ai-dikte-installed
+          cd /tmp
+          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --version
+          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --self-test
+          cd "$GITHUB_WORKSPACE"
           if bsdtar -tf "$base_pkg" | grep -q '^usr/bin/kwtype$'; then
             echo "Base package must not bundle KWtype"
             exit 1

@@ -17,7 +17,6 @@ $NC     = "$([char]27)[0m"
 Write-Host "${BOLD}${BLUE}==>${NC} ${BOLD}AI Dikte Installer for Windows${NC}"
 
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\AI-Dikte"
-$fallbackDir = Join-Path $env:LOCALAPPDATA "ai-dikte"
 $exePath = Join-Path $installDir "ai-dikte.exe"
 $cmdLauncher = Join-Path $installDir "ai-dikte.cmd"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -62,17 +61,6 @@ function Set-PreferredUserPath {
     $env:Path = "$Preferred;$env:Path"
 }
 
-function Set-RegistryStartup {
-    param(
-        [Parameter(Mandatory = $true)][string]$Executable,
-        [string]$Arguments = "daemon"
-    )
-
-    $cmd = "`"$Executable`" $Arguments"
-    Set-ItemProperty -Path $runKey -Name $appName -Value $cmd -Force
-    Write-Host "${BOLD}${BLUE}==>${NC} Configured Windows sign-in startup via Registry: $appName"
-}
-
 function Remove-LegacyStartupFiles {
     $startupFolder = [Environment]::GetFolderPath("Startup")
     Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.vbs") -Force -ErrorAction SilentlyContinue
@@ -86,9 +74,11 @@ function Start-DaemonProcess {
     )
 
     Write-Host "${BOLD}${BLUE}==>${NC} Starting background hotkey listener..."
-    Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden | Out-Null
-    Start-Sleep -Milliseconds 500
-    Write-Host "${GREEN}[OK]${NC} Background listener started."
+    $daemon = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 1
+    $daemon.Refresh()
+    if ($daemon.HasExited) { throw "Background listener exited during startup (code $($daemon.ExitCode))." }
+    Write-Host "${GREEN}[OK]${NC} Background listener process is running."
 }
 
 function Write-StartMenuShortcut {
@@ -122,7 +112,6 @@ function Stop-InstalledDaemon {
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-$installedStandalone = $false
 
 try {
     Write-Host "${BOLD}${BLUE}==>${NC} Looking for the latest standalone Windows release..."
@@ -164,106 +153,35 @@ try {
     Stop-InstalledDaemon -ExecutablePaths @($exePath)
     Move-Item -Path $downloadExe -Destination $exePath -Force
     Remove-Item -Path $runtimeOverride -Force -ErrorAction SilentlyContinue
-    $installedStandalone = $true
     Write-Host "${GREEN}[OK]${NC} Installed verified standalone executable: $exePath"
 }
 catch {
-    $downloadError = $_.Exception.Message
-    if (Test-Path $exePath) {
-        Write-Host "${YELLOW}[WARN]${NC} Download failed; checking the existing installation: $downloadError"
-        $checkProc = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
-        if ($checkProc.ExitCode -eq 0) {
-            $installedStandalone = $true
-            Write-Host "${GREEN}[OK]${NC} Keeping the existing verified standalone executable."
-        }
-    }
-    if (-not $installedStandalone) {
-        Write-Host "${YELLOW}[WARN]${NC} No usable standalone release is available: $downloadError"
-        Write-Host "${YELLOW}[WARN]${NC} Falling back to the Python-based installer path."
-    }
+    throw "AI Dikte installation failed: $($_.Exception.Message). No alternative installation was attempted."
 }
 finally {
     Remove-Item -Path $downloadExe, $downloadChecksum -Force -ErrorAction SilentlyContinue
 }
 
-if ($installedStandalone) {
-    ('@echo off' + "`r`n" + '"%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe" %*') | Out-File -FilePath $cmdLauncher -Encoding ASCII -Force
-    Set-PreferredUserPath -Preferred $installDir -Remove @($fallbackDir)
-    Remove-LegacyStartupFiles
-    Set-RegistryStartup -Executable $exePath -Arguments "daemon"
-    Write-StartMenuShortcut -Executable $exePath -Arguments "daemon"
-
-    Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
-    $setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
-    if ($setupProc.ExitCode -ne 0) {
-        throw "AI Dikte setup failed with exit code $($setupProc.ExitCode)"
-    }
-
-    Write-Host "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-    $doctorProc = Start-Process -FilePath $exePath -ArgumentList "doctor" -Wait -PassThru -NoNewWindow
-    if ($doctorProc.ExitCode -ne 0) {
-        Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
-    }
-
-    Start-DaemonProcess -Executable $exePath -Arguments "daemon"
-
-    Write-Host ""
-    Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running now and will start automatically when you sign in."
-    Write-Host "Command: ${BOLD}ai-dikte${NC}"
-    exit 0
-}
-
-# Python/source fallback for development or a temporary Release outage.
-$pythonCmd = $null
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    $pythonCmd = "python"
-} elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    $pythonCmd = "py"
-}
-
-if (-not $pythonCmd) {
-    Write-Host "${RED}[ERROR]${NC} No usable standalone release is available and Python was not found."
-    Write-Host "Install Python 3.10+ and rerun this installer."
-    exit 1
-}
-
-$pythonVersion = & $pythonCmd --version 2>&1
-Write-Host "${BOLD}${BLUE}==>${NC} Found $pythonVersion"
-& $pythonCmd -m pip install --quiet --upgrade pip
-& $pythonCmd -m pip install --quiet -r "https://raw.githubusercontent.com/Yakrel/ai-dikte/main/requirements.txt"
-
-New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null
-$scriptPath = Join-Path $fallbackDir "ai-dikte"
-$pyWrapperPath = Join-Path $fallbackDir "ai_dikte.py"
-$baseUrl = "https://raw.githubusercontent.com/Yakrel/ai-dikte/main"
-Invoke-WebRequest -Uri "$baseUrl/ai-dikte" -OutFile $scriptPath
-Invoke-WebRequest -Uri "$baseUrl/ai_dikte.py" -OutFile $pyWrapperPath
-Invoke-WebRequest -Uri "$baseUrl/ai_dikte_windows.py" -OutFile (Join-Path $fallbackDir "ai_dikte_windows.py")
-
-$fallbackLauncher = Join-Path $fallbackDir "ai-dikte.cmd"
-('@echo off' + "`r`n" + "$pythonCmd `"%LOCALAPPDATA%\ai-dikte\ai_dikte.py`" %*") | Out-File -FilePath $fallbackLauncher -Encoding ASCII -Force
-Set-PreferredUserPath -Preferred $fallbackDir -Remove @($installDir)
-
-$pythonExe = (& $pythonCmd -c "import sys; print(sys.executable)").Trim()
-$pythonwExe = Join-Path (Split-Path $pythonExe) "pythonw.exe"
-if (-not (Test-Path $pythonwExe)) {
-    $pythonwExe = $pythonExe
-}
+('@echo off' + "`r`n" + '"%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe" %*') | Out-File -FilePath $cmdLauncher -Encoding ASCII -Force
+Set-PreferredUserPath -Preferred $installDir
 Remove-LegacyStartupFiles
-Set-RegistryStartup -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
-Write-StartMenuShortcut -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
-& $pythonCmd $pyWrapperPath setup
-if ($LASTEXITCODE -ne 0) {
-    throw "AI Dikte setup failed with exit code $LASTEXITCODE"
+Write-StartMenuShortcut -Executable $exePath -Arguments "daemon"
+
+Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
+$setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
+if ($setupProc.ExitCode -ne 0) {
+    throw "AI Dikte setup failed with exit code $($setupProc.ExitCode)"
 }
 
 Write-Host "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-& $pythonCmd $pyWrapperPath doctor
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "${YELLOW}[WARN]${NC} Doctor reported one or more incomplete checks. Review the output above."
+$doctorProc = Start-Process -FilePath $exePath -ArgumentList "doctor" -Wait -PassThru -NoNewWindow
+if ($doctorProc.ExitCode -ne 0) {
+    throw "AI Dikte diagnostics failed. Resolve the reported problem before starting dictation."
 }
 
-Start-DaemonProcess -Executable $pythonwExe -Arguments "`"$pyWrapperPath`" daemon"
+Start-DaemonProcess -Executable $exePath -Arguments "daemon"
 
 Write-Host ""
-Write-Host "${GREEN}${BOLD}Setup complete!${NC} Python fallback installation is active, running now, and configured to start automatically at sign-in."
+Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Sign-in startup follows your Settings selection."
+Write-Host "Command: ${BOLD}ai-dikte${NC}"
+exit 0

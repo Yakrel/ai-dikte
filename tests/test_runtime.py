@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import runpy
+import importlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,7 +26,9 @@ class RuntimeContractTests(unittest.TestCase):
             },
         )
         cls.environment.start()
-        cls.runtime = runpy.run_path(str(Path(__file__).parents[1] / "ai-dikte"))
+        import ai_dikte_config, ai_dikte_core
+        importlib.reload(ai_dikte_config)
+        cls.runtime = vars(importlib.reload(ai_dikte_core))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -88,52 +90,31 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertNotIn("api_key", saved_config)
         self.assertEqual(saved_config["mode"], "SMART")
 
-    @unittest.skipUnless(os.name == "nt", "Windows first-run setup contract")
-    def test_windows_first_run_skips_when_credential_manager_has_key(self) -> None:
-        wrapper = runpy.run_path(str(Path(__file__).parents[1] / "ai_dikte.py"))
-        with mock.patch("sys.platform", "win32"), mock.patch("sys.argv", ["ai-dikte.exe"]):
-            with mock.patch("runpy.run_path", return_value={"load_api_key": lambda required=False: "vault-key"}):
-                triggered = wrapper["windows_first_run_setup"](Path("ai-dikte"))
-                self.assertFalse(triggered)
+    def test_first_run_cancel_does_not_start_daemon(self):
+        import ai_dikte
+        import ai_dikte_core as core
+        with mock.patch("sys.platform", "win32"), mock.patch("sys.argv", ["ai-dikte.exe"]), \
+             mock.patch.object(ai_dikte, "init_windows_console"), \
+             mock.patch.object(core, "load_api_key", return_value=""), \
+             mock.patch.object(core, "setup", side_effect=SystemExit(1)), \
+             mock.patch.object(core, "main") as dispatch:
+            with self.assertRaises(SystemExit):
+                ai_dikte.main()
+            dispatch.assert_not_called()
 
-    @unittest.skipUnless(os.name == "nt", "Windows first-run setup contract")
-    def test_windows_first_run_uses_gui_then_starts_daemon(self) -> None:
-        wrapper = runpy.run_path(str(Path(__file__).parents[1] / "ai_dikte.py"))
-        key_reader = mock.Mock(side_effect=["", "vault-key"])
-        gui_mock = mock.Mock()
-        daemon_mock = mock.Mock()
-        with mock.patch("sys.platform", "win32"), mock.patch("sys.argv", ["ai-dikte.exe"]):
-            wrapper["windows_first_run_setup"].__globals__["start_windows_daemon_background"] = daemon_mock
-            with mock.patch(
-                "runpy.run_path",
-                return_value={
-                    "load_api_key": key_reader,
-                    "run_tray_gui_command": gui_mock,
-                },
-            ):
-                triggered = wrapper["windows_first_run_setup"](Path("ai-dikte"))
-                self.assertTrue(triggered)
-                gui_mock.assert_called_once_with("setup")
-                daemon_mock.assert_called_once()
+    def test_configured_windows_double_click_starts_daemon(self):
+        import ai_dikte
+        import ai_dikte_core as core
+        with mock.patch("sys.platform", "win32"), mock.patch("sys.argv", ["ai-dikte.exe"]), \
+             mock.patch.object(ai_dikte, "init_windows_console"), \
+             mock.patch.object(ai_dikte, "acquire_windows_daemon_mutex", return_value=True) as mutex, \
+             mock.patch.object(core, "load_api_key", return_value="key"), \
+             mock.patch.object(core, "setup") as setup, mock.patch.object(core, "main") as dispatch:
+            ai_dikte.main()
+            mutex.assert_called_once_with("daemon")
+            dispatch.assert_called_once()
+            setup.assert_not_called()
 
-    @unittest.skipUnless(os.name == "nt", "Windows first-run setup contract")
-    def test_windows_first_run_cancel_does_not_start_daemon(self) -> None:
-        wrapper = runpy.run_path(str(Path(__file__).parents[1] / "ai_dikte.py"))
-        gui_mock = mock.Mock()
-        daemon_mock = mock.Mock()
-        with mock.patch("sys.platform", "win32"), mock.patch("sys.argv", ["ai-dikte.exe"]):
-            wrapper["windows_first_run_setup"].__globals__["start_windows_daemon_background"] = daemon_mock
-            with mock.patch(
-                "runpy.run_path",
-                return_value={
-                    "load_api_key": lambda required=False: "",
-                    "run_tray_gui_command": gui_mock,
-                },
-            ):
-                triggered = wrapper["windows_first_run_setup"](Path("ai-dikte"))
-                self.assertTrue(triggered)
-                gui_mock.assert_called_once_with("setup")
-                daemon_mock.assert_not_called()
     def test_failed_validation_never_saves_candidate_key(self) -> None:
         save = mock.Mock()
         self.replace_global("save_settings", "load_config", lambda required=False: {})
@@ -184,17 +165,34 @@ class RuntimeContractTests(unittest.TestCase):
             self.runtime["setup"]()
         self.assertEqual(raised.exception.code, 1)
 
-    @unittest.skipIf(os.name == "nt", "Linux terminal setup")
-    def test_linux_setup_keeps_key_and_selects_dictation_language(self) -> None:
-        save = mock.Mock()
-        self.replace_global("setup", "load_config", lambda required=False: {"language": "tr-TR"})
-        self.replace_global("setup", "load_api_key", lambda required=False: "key")
-        self.replace_global("setup", "getpass", SimpleNamespace(getpass=lambda prompt: ""))
-        self.replace_global("setup", "save_settings", save)
-        with mock.patch("builtins.input", return_value="en-US"):
-            self.runtime["setup"]()
-        self.assertEqual(save.call_args.args[0], "key")
-        self.assertEqual(save.call_args.args[1]["language"], "en-US")
+    def test_linux_setup_uses_the_same_gui(self):
+        gui = mock.Mock(return_value=True)
+        self.replace_global("setup", "IS_WINDOWS", False)
+        self.replace_global("setup", "run_tray_gui_command", gui)
+        self.runtime["setup"]()
+        gui.assert_called_once_with("setup")
+
+    def test_typing_failure_does_not_try_another_backend(self):
+        self.replace_global("output_text", "IS_WINDOWS", False)
+        self.replace_global("output_text", "desktop_kind", lambda: "hyprland")
+        self.replace_global("output_text", "load_config", lambda required=False: {})
+        with mock.patch("shutil.which", return_value="/usr/bin/wtype"), \
+             mock.patch("subprocess.run", return_value=SimpleNamespace(returncode=1, stderr="failed")) as run:
+            with self.assertRaisesRegex(RuntimeError, "wtype failed"):
+                self.runtime["output_text"]("hello")
+            run.assert_called_once()
+
+    def test_missing_desktop_backend_does_not_select_installed_alternative(self):
+        self.replace_global("output_candidates", "IS_WINDOWS", False)
+        self.replace_global("output_candidates", "desktop_kind", lambda: "hyprland")
+        self.replace_global("output_candidates", "load_config", lambda required=False: {})
+        with mock.patch("shutil.which", side_effect=lambda name: "/usr/bin/kwtype" if name == "kwtype" else None):
+            self.assertIsNone(self.runtime["available_output_driver"]())
+
+    def test_linux_daemon_fails_explicitly(self):
+        self.replace_global("run_daemon", "IS_WINDOWS", False)
+        with self.assertRaisesRegex(RuntimeError, "Windows-only"):
+            self.runtime["run_daemon"]()
 
     def test_selected_microphone_reaches_sounddevice_stream(self) -> None:
         captured: dict[str, object] = {}
@@ -241,13 +239,14 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertFalse(self.runtime["windows_startup_enabled"]())
     def test_tray_command_routes_to_platform_entrypoint(self) -> None:
         command = self.runtime["tray_child_command"]("setup")
-        expected = "_tray-setup" if os.name == "nt" else "setup"
+        expected = "_tray-setup"
         self.assertEqual(command[-1], expected)
 
 
 class TranscriptTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.runtime = runpy.run_path(str(Path(__file__).parents[1] / "ai-dikte"))
+        import ai_dikte_core
+        self.runtime = vars(ai_dikte_core)
         self.runtime["collect_final_transcript"].__globals__["log_session_event"] = lambda message: None
         self.queue = asyncio.Queue()
         self.complete = asyncio.Event()
