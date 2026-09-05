@@ -238,6 +238,7 @@ $pyWrapperPath = Join-Path $fallbackDir "ai_dikte.py"
 $baseUrl = "https://raw.githubusercontent.com/Yakrel/ai-dikte/main"
 Invoke-WebRequest -Uri "$baseUrl/ai-dikte" -OutFile $scriptPath
 Invoke-WebRequest -Uri "$baseUrl/ai_dikte.py" -OutFile $pyWrapperPath
+Invoke-WebRequest -Uri "$baseUrl/ai_dikte_windows.py" -OutFile (Join-Path $fallbackDir "ai_dikte_windows.py")
 
 $fallbackLauncher = Join-Path $fallbackDir "ai-dikte.cmd"
 ('@echo off' + "`r`n" + "$pythonCmd `"%LOCALAPPDATA%\ai-dikte\ai_dikte.py`" %*") | Out-File -FilePath $fallbackLauncher -Encoding ASCII -Force

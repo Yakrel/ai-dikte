@@ -30,6 +30,8 @@ from urllib.parse import quote
 if sys.platform == "win32":
     import ctypes
     import msvcrt
+    import winreg  # noqa: F401
+    import ai_dikte_windows  # noqa: F401; bundle the settings module
     import tkinter  # noqa: F401
     from tkinter import ttk as _ttk  # noqa: F401
     import winsound  # noqa: F401
@@ -136,7 +138,7 @@ def start_windows_daemon_background(script_path: Path) -> None:
     if getattr(sys, "frozen", False):
         cmd = [sys.executable, "daemon"]
     else:
-        cmd = [sys.executable, str(script_path), "daemon"]
+        cmd = [sys.executable, str(Path(__file__).resolve()), "daemon"]
 
     subprocess.Popen(
         cmd,
@@ -168,6 +170,14 @@ def windows_first_run_setup(script_path: Path) -> bool:
 def runtime_self_test() -> int:
     """Verify the frozen Windows build contains its runtime dependencies."""
     failures: list[str] = []
+    if sys.platform == "win32":
+        try:
+            from ai_dikte_windows import show_dialog
+            if not callable(show_dialog):
+                failures.append("Windows settings dialog unavailable")
+        except Exception as exc:
+            failures.append(f"Windows settings module: {exc}")
+
 
     try:
         import websockets
@@ -277,6 +287,8 @@ def main() -> None:
     if windows_first_run_setup(script_path):
         return
 
+    if sys.platform == "win32" and len(sys.argv) == 1:
+        sys.argv.append("daemon")
     command = sys.argv[1] if len(sys.argv) > 1 else None
     if not acquire_windows_daemon_mutex(command):
         return

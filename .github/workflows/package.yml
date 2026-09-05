@@ -26,6 +26,7 @@ jobs:
         run: |
           python -m py_compile ai-dikte
           bash -n install.sh
+          python -m unittest discover -s tests -v
 
       - name: Build minimal base package
         run: |

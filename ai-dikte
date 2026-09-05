@@ -101,153 +101,6 @@ HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/ai-dikte-toggle"
 _GLOBAL_TRAY_ICON: Any = None
 _GLOBAL_OSD: Any = None  # WindowsOSD, initialized lazily
 
-TRANSLATIONS = {
-    "tr": {
-        "app_name": "AI Dikte",
-        "settings_title": "AI Dikte — Ayarlar",
-        "settings_subtitle": "Dikte deneyiminizi tek bir yerden yönetin.",
-        "section_account": "Hesap ve güvenlik",
-        "section_account_help": "API erişimi",
-        "section_language": "Dil ve metin",
-        "section_language_help": "Arayüz ve transkripsiyon",
-        "section_audio": "Ses",
-        "section_audio_help": "Giriş aygıtı ve geri bildirim",
-        "section_behavior": "Dikte davranışı",
-        "section_behavior_help": "Metin işleme ve bildirimler",
-        "section_vocabulary": "Özel kelimeler",
-        "section_vocabulary_help": "İsimleri ve teknik terimleri doğru yazdırın",
-        "show_key": "Göster",
-        "hide_key": "Gizle",
-        "hotkey_badge": "WIN + Z",
-        "save_shortcut": "Ctrl+Enter ile kaydet",
-        "report_ok": "Tüm kontroller başarılı",
-        "report_warning": "Dikkat gerekiyor",
-        "doctor_title": "AI Dikte — Sistem Tanılaması",
-        "api_key_label": "Google AI API Anahtarı",
-        "api_key_help": "Gemini API anahtarınız Windows Credential Manager'da güvenle saklanır.",
-        "ui_language_label": "Arayüz Dili",
-        "ui_lang_auto": "Sistem Varsayılanı (Otomatik)",
-        "ui_lang_tr": "Türkçe",
-        "ui_lang_en": "English",
-        "dictation_lang_label": "Dikte Dili (Transkripsiyon)",
-        "dictation_lang_tr": "Türkçe (tr-TR)",
-        "dictation_lang_en_us": "İngilizce (en-US)",
-        "dictation_lang_custom": "Diğer (Özel Kod...)",
-        "custom_lang_placeholder": "Örn: de-DE, fr-FR, es-ES",
-        "mode_label": "İşleme Modu",
-        "mode_smart": "Akıllı Mod (SMART) — Noktalama, büyük/küçük harf ve akıcı metin",
-        "mode_verbatim": "Ham Mod (VERBATIM) — Noktalamasız, söylenen kelimeleri olduğu gibi yazar",
-        "microphone_label": "Mikrofon / Ses Girişi",
-        "mic_default": "Sistem varsayılanı",
-        "mic_unavailable": "Kullanılamıyor",
-        "vocabulary_label": "Özel Kelime Dağarcığı",
-        "vocabulary_help": "Her satıra bir terim yazın (Örn: Proxmox, Omarchy)",
-        "notifications_label": "Bildirimler",
-        "notify_all": "Tüm bildirimleri göster (all)",
-        "notify_none": "Yalnızca kritik hataları göster (none)",
-        "audio_cue_label": "Başlangıç ve bitiş sesli uyarılarını çal",
-        "startup_label": "Windows açıldığında AI Dikte'yi otomatik başlat",
-        "info_footer": "Kısayol: Win+Z    Çıkış: SendInput    Model: {model}",
-        "status_default": "API anahtarı ve ayarlar kaydedilmeden önce canlı API ile doğrulanır.",
-        "status_validating": "API anahtarı ve model erişimi doğrulanıyor...",
-        "status_success": "API anahtarı doğrulandı ve tüm ayarlar başarıyla kaydedildi.",
-        "status_unsaved": "Kaydedilmemiş değişiklikler var.",
-        "status_empty_key": "API anahtarı boş bırakılamaz.",
-        "btn_save": "Doğrula ve Kaydet",
-        "btn_validating": "Doğrulanıyor...",
-        "btn_cancel": "İptal",
-        "btn_close": "Kapat",
-        "tray_toggle": "Dikteyi Aç/Kapat (Win+Z)",
-        "tray_setup": "Ayarlar",
-        "tray_doctor": "Sistem Tanılaması",
-        "tray_microphone": "Mikrofon: {mic}",
-        "tray_model": "Model: {model}",
-        "tray_logs": "Günlükleri Aç",
-        "tray_copy_diag": "Tanılamayı Kopyala",
-        "tray_startup": "Windows ile Başlat",
-        "tray_restart": "Yeniden Başlat",
-        "tray_exit": "Çıkış",
-        "tray_ready": "AI Dikte — Hazır (Win+Z)",
-        "tray_recording": "AI Dikte — Dinleniyor...",
-        "tray_transcribing": "AI Dikte — Metne dönüştürülüyor...",
-        "tray_starting": "AI Dikte — Başlatılıyor...",
-    },
-    "en": {
-        "app_name": "AI Dikte",
-        "settings_title": "AI Dikte — Settings",
-        "settings_subtitle": "Manage your dictation experience in one place.",
-        "section_account": "Account & security",
-        "section_account_help": "API access",
-        "section_language": "Language & text",
-        "section_language_help": "Interface and transcription",
-        "section_audio": "Audio",
-        "section_audio_help": "Input device and feedback",
-        "section_behavior": "Dictation behavior",
-        "section_behavior_help": "Text processing and notifications",
-        "section_vocabulary": "Custom words",
-        "section_vocabulary_help": "Improve names and technical terms",
-        "show_key": "Show",
-        "hide_key": "Hide",
-        "hotkey_badge": "WIN + Z",
-        "save_shortcut": "Ctrl+Enter to save",
-        "report_ok": "All checks passed",
-        "report_warning": "Attention required",
-        "doctor_title": "AI Dikte — System Diagnostics",
-        "api_key_label": "Google AI API Key",
-        "ui_language_label": "Interface Language",
-        "ui_lang_auto": "System Default (Auto)",
-        "ui_lang_tr": "Türkçe",
-        "ui_lang_en": "English",
-        "dictation_lang_label": "Dictation Language (Transcription)",
-        "dictation_lang_tr": "Turkish (tr-TR)",
-        "dictation_lang_en_us": "English (en-US)",
-        "dictation_lang_custom": "Other (Custom Code...)",
-        "custom_lang_placeholder": "E.g.: de-DE, fr-FR, es-ES",
-        "mode_label": "Processing Mode",
-        "mode_smart": "Smart Mode (SMART) — Natural punctuation & fluent formatting",
-        "mode_verbatim": "Verbatim Mode (VERBATIM) — Raw spoken words without punctuation",
-        "microphone_label": "Microphone / Audio Input",
-        "mic_default": "System default",
-        "mic_unavailable": "Unavailable",
-        "vocabulary_label": "Custom Vocabulary",
-        "vocabulary_help": "One term per line (E.g.: Proxmox, Omarchy)",
-        "notifications_label": "Notifications",
-        "notify_all": "Show all notifications (all)",
-        "notify_none": "Critical errors only (none)",
-        "audio_cue_label": "Play start and stop audio cues",
-        "startup_label": "Start AI Dikte when I sign in",
-        "info_footer": "Hotkey: Win+Z    Output: SendInput    Model: {model}",
-        "status_default": "The API key and settings are verified with the live API before saving.",
-        "status_validating": "Validating the API key and model access...",
-        "status_success": "API key validated and all settings saved successfully.",
-        "status_unsaved": "You have unsaved changes.",
-        "status_empty_key": "API key cannot be empty.",
-        "btn_save": "Validate & Save",
-        "btn_validating": "Validating...",
-        "btn_cancel": "Cancel",
-        "btn_close": "Close",
-        "tray_toggle": "Toggle Dictation (Win+Z)",
-        "tray_setup": "Settings",
-        "tray_doctor": "Doctor",
-        "tray_microphone": "Microphone: {mic}",
-        "tray_model": "Model: {model}",
-        "tray_logs": "Open Logs",
-        "tray_copy_diag": "Copy Diagnostics",
-        "tray_startup": "Start with Windows",
-        "tray_restart": "Restart",
-        "tray_exit": "Exit",
-        "tray_ready": "AI Dikte — Ready (Win+Z)",
-        "tray_recording": "AI Dikte — Listening...",
-        "tray_transcribing": "AI Dikte — Transcribing...",
-        "tray_starting": "AI Dikte — Starting...",
-    },
-}
-
-
-def get_translation(lang: str, key: str, **kwargs: Any) -> str:
-    table = TRANSLATIONS.get(lang) or TRANSLATIONS["tr"]
-    template = table.get(key) or TRANSLATIONS["en"].get(key) or key
-    return template.format(**kwargs) if kwargs else template
 def ensure_windows_start_menu_shortcut() -> None:
     if not IS_WINDOWS:
         return
@@ -288,8 +141,6 @@ def ensure_windows_start_menu_shortcut() -> None:
         )
     except Exception:
         pass
-
-
 
 
 def ensure_runtime() -> None:
@@ -534,13 +385,13 @@ def notify(
         osd = get_windows_osd()
         if osd is not None:
             if event_type == "start":
-                osd.show("Dinleniyor...", "#f38ba8")
+                osd.show("Listening...", "#f38ba8")
             elif event_type == "transcribing":
-                osd.show("Metne dönüştürülüyor...", "#f9e2af")
+                osd.show("Transcribing...", "#f9e2af")
             elif event_type == "finish":
-                osd.show("Yazıldı ✨", "#a6e3a1", auto_hide_ms=1200)
+                osd.show("Text inserted", "#a6e3a1", auto_hide_ms=1200)
             elif event_type == "error":
-                osd.show(f"Hata: {message[:35]}", "#f38ba8", auto_hide_ms=3000)
+                osd.show(f"Error: {message[:35]}", "#f38ba8", auto_hide_ms=3000)
             else:
                 osd.show(message, "#89b4fa", auto_hide_ms=2000)
             return
@@ -799,46 +650,17 @@ def list_input_devices() -> list[tuple[int | None, str]]:
     return devices
 
 
-def config_ui_language(config: dict[str, Any]) -> str:
-    value = str(config.get("ui_language", "auto")).strip().lower() or "auto"
-    if value not in {"auto", "tr", "en"}:
-        raise RuntimeError("Config 'ui_language' must be auto, tr, or en.")
-    return value
-
-
-def resolve_ui_language(config: dict[str, Any] | None = None) -> str:
-    config = config or {}
-    choice = config_ui_language(config)
-    if choice in ("tr", "en"):
-        return choice
-    if str(config.get("language", "")).strip().lower().startswith("tr"):
-        return "tr"
-    try:
-        if IS_WINDOWS:
-            lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
-            if (lang_id & 0x3FF) == 0x1F:  # Turkish
-                return "tr"
-        import locale
-
-        loc = locale.getlocale()[0] or os.environ.get("LANG", "")
-        if loc and loc.lower().startswith("tr"):
-            return "tr"
-    except Exception:
-        pass
-    return "tr"
-
-
-def microphone_label(config: dict[str, Any], lang: str = "tr") -> str:
+def microphone_label(config: dict[str, Any]) -> str:
     selected = config_input_device(config)
     if selected is None:
-        return get_translation(lang, "mic_default")
+        return 'System default'
     try:
         device = sounddevice.query_devices(selected, "input") if sounddevice else None
         if device:
             return f"{selected}: {str(device.get('name', 'Microphone')).strip()}"
     except Exception:
         pass
-    return f"{selected}: {get_translation(lang, 'mic_unavailable')}"
+    return f"{selected}: {'Unavailable'}"
 
 def microphone_available(config: dict[str, Any]) -> bool:
     if sounddevice is None:
@@ -862,6 +684,7 @@ def build_setup_config(
     config = dict(existing)
     if updates:
         config.update(updates)
+    config.pop("ui_language", None)
     config.update(
         {
             "language": config_language(config),
@@ -872,12 +695,10 @@ def build_setup_config(
             "audio_cue": config_audio_cue(config),
             "notify_mode": config_notify_mode(config),
             "input_device": config_input_device(config),
-            "ui_language": config_ui_language(config),
+
         }
     )
     return config
-
-
 
 
 def save_setup_config(key: str, config: dict[str, Any] | None = None) -> None:
@@ -900,15 +721,36 @@ def save_setup_config(key: str, config: dict[str, Any] | None = None) -> None:
         install_hyprland_shortcut()
 
 
+def save_settings(key: str, candidate: dict[str, Any]) -> None:
+    """Validate API-affecting changes; save local preferences without a network call."""
+    key = key.strip()
+    if not key:
+        raise RuntimeError("API key cannot be empty.")
+    existing = load_config(required=False)
+    old_key = load_api_key(required=False)
+    candidate = build_setup_config(candidate)
+    normalized_existing = build_setup_config(existing)
+    api_fields = ("language", "mode", "custom_vocabulary")
+    if not existing or key != old_key or any(
+        candidate.get(field) != normalized_existing.get(field) for field in api_fields
+    ):
+        validate_api_key(key, candidate)
+    save_setup_config(key, candidate)
+
+
 def setup() -> None:
+    if IS_WINDOWS:
+        if not run_tray_gui_command("setup"):
+            raise SystemExit(1)
+        return
     existing = build_setup_config(load_config(required=False))
     old_key = load_api_key(required=False)
     key = getpass.getpass("Google AI API key (Enter keeps current): ").strip() or old_key
-    if not key:
-        fail("API key cannot be empty.")
-    print("[*] Validating Google AI API key...")
-    validate_api_key(key, existing)
-    save_setup_config(key, existing)
+    language = input(
+        f"Dictation language: tr-TR (Turkish), en-US (English), or another code [{config_language(existing)}]: "
+    ).strip() or config_language(existing)
+    candidate = build_setup_config(existing, {"language": language})
+    save_settings(key, candidate)
 
 
 def desktop_kind() -> str:
@@ -1255,7 +1097,7 @@ class WindowsSessionController:
                     play_audio_cue("stop")
                     notify(
                         "AI Dikte",
-                        "Metne dönüştürülüyor...",
+                        "Transcribing...",
                         event_type="transcribing",
                     )
                 return
@@ -1266,7 +1108,7 @@ class WindowsSessionController:
             self.state = "starting"
             self.stop_event = threading.Event()
             play_audio_cue("start")
-            notify("AI Dikte", "Dinleniyor...", event_type="start")
+            notify("AI Dikte", "Listening...", event_type="start")
             self.session_thread = threading.Thread(
                 target=self._session_worker,
                 args=(self.stop_event,),
@@ -1580,29 +1422,9 @@ async def send_audio(websocket, chunk: bytes) -> None:
 
 
 def merge_final_segment(segments: list[str], text: str) -> None:
-    """Append a finalized speech segment without duplicating cumulative updates."""
-    text = text.strip()
-    if not text:
-        return
-
-    if not segments:
-        segments.append(text)
-        return
-
-    previous = segments[-1]
-    if text == previous:
-        return
-    if text.startswith(previous):
-        segments[-1] = text
-        return
-    if previous.startswith(text):
-        return
-
-    joined = " ".join(segments)
-    if joined.endswith(text):
-        return
-
-    segments.append(text)
+    """Each final message is a committed segment, even when words repeat."""
+    if text.strip():
+        segments.append(text.strip())
 
 
 async def receive_transcriptions(
@@ -1639,8 +1461,8 @@ async def receive_transcriptions(
                 )
                 await transcripts.put(("interim", interim_text))
 
-            if content.get("turnComplete") or content.get("generationComplete"):
-                log_session_event("Received turnComplete / generationComplete signal.")
+            if content.get("turnComplete"):
+                log_session_event("Received turnComplete signal.")
                 turn_complete_event.set()
     except websockets.exceptions.ConnectionClosed as exc:
         code = getattr(exc, "code", None)
@@ -1665,53 +1487,50 @@ async def collect_final_transcript(
     transcripts: asyncio.Queue[tuple[str, str]],
     receiver_task: asyncio.Task[None],
     turn_complete_event: asyncio.Event,
+    *,
+    timeout: float = 10.0,
 ) -> str:
-    """Collect all finalized speech segments, with interim text only as a fallback."""
+    """Wait for completion and final text instead of guessing from speech pauses.
+
+    Input transcription is independent of turn messages, so allow a short drain
+    after completion and keep waiting if the latest hypothesis is still interim.
+    Never silently inject a known-incomplete transcript on timeout/disconnect.
+    """
     final_segments: list[str] = []
-    latest_interim = ""
-    deadline = time.monotonic() + 4.0
+    pending_interim = False
+    deadline = time.monotonic() + timeout
+    complete_since: float | None = None
     last_update = time.monotonic()
-
-    while time.monotonic() < deadline:
+    while True:
         await raise_if_receiver_failed(receiver_task)
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        now = time.monotonic()
+        if turn_complete_event.is_set() and complete_since is None:
+            complete_since = now
+        if (complete_since is not None and transcripts.empty() and not pending_interim
+                and now - max(complete_since, last_update) >= 0.5):
             break
-
+        if now >= deadline:
+            raise RuntimeError("Timed out waiting for the final transcription. Please try again.")
+        if receiver_task.done() and transcripts.empty():
+            if turn_complete_event.is_set() and not pending_interim:
+                break
+            raise RuntimeError("Connection ended before transcription was complete.")
         try:
             kind, text = await asyncio.wait_for(
-                transcripts.get(),
-                timeout=min(0.25, max(0.05, remaining)),
+                transcripts.get(), timeout=min(0.1, deadline - now)
             )
         except asyncio.TimeoutError:
-            await raise_if_receiver_failed(receiver_task)
-            quiet_for = time.monotonic() - last_update
-
-            if turn_complete_event.is_set() and final_segments and transcripts.empty():
-                break
-            if final_segments and quiet_for >= 0.75 and transcripts.empty():
-                break
-            if not final_segments and latest_interim and quiet_for >= 1.0 and transcripts.empty():
-                break
             continue
-
         last_update = time.monotonic()
         if kind == "final":
             merge_final_segment(final_segments, text)
-            latest_interim = ""
+            pending_interim = False
         elif kind == "interim":
-            latest_interim = text.strip()
-
+            pending_interim = bool(text.strip())
     result = " ".join(final_segments).strip()
     if not result:
-        result = latest_interim.strip()
-
-    log_session_event(
-        f"Collected transcription ({len(result)} chars, {len(final_segments)} final segment(s))."
-    )
-    if not result:
         raise RuntimeError("Gemini returned no transcription.")
+    log_session_event(f"Collected {len(final_segments)} final segment(s), {len(result)} chars.")
     return result
 
 
@@ -2408,985 +2227,12 @@ def launch_tray_command(subcmd: str) -> subprocess.Popen:
     )
 
 
-def run_tray_gui_command(subcmd: str) -> None:
-    """Show Windows tray commands through Tk dialogs that cannot open invisibly."""
-    import tkinter as tk
-    from tkinter import ttk
+def run_tray_gui_command(subcmd: str) -> bool:
+    """Load the Windows-only UI lazily; Linux needs no Tk dependency."""
+    from types import SimpleNamespace
+    from ai_dikte_windows import show_dialog
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        icon_path = Path(__file__).resolve().parent / "ai-dikte.png"
-        if not icon_path.is_file() and getattr(sys, "frozen", False):
-            bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
-            candidate = bundle_dir / "ai-dikte.png"
-            if candidate.is_file():
-                icon_path = candidate
-        if icon_path.is_file():
-            icon_img = tk.PhotoImage(file=str(icon_path))
-            root.iconphoto(True, icon_img)
-    except Exception:
-        pass
-
-    def show_window(
-        title: str,
-        width: int,
-        height: int,
-        min_width: int = 640,
-        min_height: int = 520,
-    ) -> None:
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        width = min(width, max(min_width, screen_width - 80))
-        height = min(height, max(min_height, screen_height - 80))
-        root.title(title)
-        root.geometry(f"{width}x{height}")
-        root.minsize(min(min_width, width), min(min_height, height))
-        root.update_idletasks()
-        x = max(0, (screen_width - width) // 2)
-        y = max(0, (screen_height - height) // 2)
-        root.geometry(f"+{x}+{y}")
-        root.deiconify()
-        root.lift()
-        root.focus_force()
-
-        def release_topmost() -> None:
-            try:
-                root.attributes("-topmost", False)
-            except tk.TclError:
-                pass
-
-        root.after(350, release_topmost)
-
-    def show_report(title: str, report: str, warning: bool = False) -> None:
-        ui_lang = resolve_ui_language(load_config_best_effort())
-        bg = "#0b1120"
-        surface = "#111827"
-        border = "#263247"
-        fg = "#f8fafc"
-        muted = "#94a3b8"
-        status_color = "#f59e0b" if warning else "#22c55e"
-        root.configure(bg=bg)
-
-        header = tk.Frame(root, bg=bg)
-        header.pack(fill="x", padx=28, pady=(24, 16))
-        tk.Label(
-            header,
-            text=get_translation(ui_lang, "report_warning" if warning else "report_ok"),
-            bg=bg,
-            fg=fg,
-            font=("Segoe UI Semibold", 17),
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text=title,
-            bg=bg,
-            fg=status_color,
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(4, 0))
-
-        report_frame = tk.Frame(
-            root,
-            bg=surface,
-            highlightbackground=border,
-            highlightthickness=1,
-        )
-        report_frame.pack(fill="both", expand=True, padx=28, pady=(0, 18))
-        report_frame.grid_rowconfigure(0, weight=1)
-        report_frame.grid_columnconfigure(0, weight=1)
-
-        report_box = tk.Text(
-            report_frame,
-            bg=surface,
-            fg="#dbeafe",
-            insertbackground=fg,
-            selectbackground="#3730a3",
-            relief="flat",
-            borderwidth=0,
-            font=("Cascadia Mono", 10),
-            wrap="word",
-            padx=18,
-            pady=16,
-        )
-        report_scroll = tk.Scrollbar(
-            report_frame,
-            command=report_box.yview,
-            relief="flat",
-            borderwidth=0,
-        )
-        report_box.configure(yscrollcommand=report_scroll.set)
-        report_box.grid(row=0, column=0, sticky="nsew")
-        report_scroll.grid(row=0, column=1, sticky="ns")
-        report_box.insert("1.0", report)
-        report_box.configure(state="disabled")
-
-        footer = tk.Frame(root, bg=bg)
-        footer.pack(fill="x", padx=28, pady=(0, 22))
-        tk.Button(
-            footer,
-            text=get_translation(ui_lang, "btn_close"),
-            command=root.quit,
-            bg="#334155",
-            fg=fg,
-            activebackground="#475569",
-            activeforeground=fg,
-            relief="flat",
-            borderwidth=0,
-            font=("Segoe UI Semibold", 10),
-            padx=22,
-            pady=8,
-            cursor="hand2",
-        ).pack(side="right")
-        root.protocol("WM_DELETE_WINDOW", root.quit)
-        root.bind("<Escape>", lambda _event: root.quit())
-        show_window(title, 700, 480)
-        root.mainloop()
-
-    try:
-        with FileLock(LOCK_FILE):
-            if subcmd == "setup":
-                existing = build_setup_config(load_config(required=False))
-                old_key = load_api_key(required=False)
-                current_ui_lang = [resolve_ui_language(existing)]
-
-                def t(key: str, **kw: Any) -> str:
-                    return get_translation(current_ui_lang[0], key, **kw)
-
-                try:
-                    raw_devices = list_input_devices()
-                    device_error = ""
-                except Exception as exc:
-                    raw_devices = [(None, "System default")]
-                    device_error = f"Microphones could not be listed: {exc}"
-
-                selected_device = config_input_device(existing)
-                bg = "#0b1120"
-                surface = "#111827"
-                card = "#172033"
-                field = "#0f172a"
-                border = "#263247"
-                fg = "#f8fafc"
-                muted = "#94a3b8"
-                accent = "#6366f1"
-                accent_hover = "#4f46e5"
-                success = "#22c55e"
-                warning = "#f59e0b"
-                error = "#fb7185"
-
-                root.configure(bg=bg)
-                style = ttk.Style(root)
-                style.theme_use("clam")
-                style.configure(
-                    "Dikte.TCombobox",
-                    background=field,
-                    fieldbackground=field,
-                    foreground=fg,
-                    arrowcolor=muted,
-                    bordercolor=border,
-                    lightcolor=border,
-                    darkcolor=border,
-                    padding=(10, 8),
-                    relief="flat",
-                    font=("Segoe UI", 10),
-                )
-                style.map(
-                    "Dikte.TCombobox",
-                    fieldbackground=[("readonly", field)],
-                    foreground=[("readonly", fg)],
-                    selectbackground=[("readonly", field)],
-                    selectforeground=[("readonly", fg)],
-                    bordercolor=[("focus", accent)],
-                    lightcolor=[("focus", accent)],
-                    darkcolor=[("focus", accent)],
-                )
-                style.configure(
-                    "Dikte.Vertical.TScrollbar",
-                    background="#334155",
-                    troughcolor=bg,
-                    bordercolor=bg,
-                    arrowcolor=muted,
-                    relief="flat",
-                )
-
-                state = {
-                    "dirty": False,
-                    "validating": False,
-                    "status_kind": "default",
-                    "error_msg": "",
-                    "updating": False,
-                    "key_visible": False,
-                }
-                result_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-
-                header = tk.Frame(root, bg=bg)
-                header.pack(fill="x", padx=30, pady=(22, 16))
-                header.grid_columnconfigure(1, weight=1)
-                brand_mark = tk.Label(
-                    header,
-                    text="AI",
-                    bg=accent,
-                    fg="white",
-                    font=("Segoe UI Semibold", 12),
-                    width=3,
-                    height=1,
-                    padx=3,
-                    pady=8,
-                )
-                brand_mark.grid(row=0, column=0, rowspan=2, sticky="w", padx=(0, 12))
-                header_title = tk.Label(
-                    header,
-                    text="AI Dikte",
-                    bg=bg,
-                    fg=fg,
-                    font=("Segoe UI Semibold", 20),
-                    anchor="w",
-                )
-                header_title.grid(row=0, column=1, sticky="w")
-                header_subtitle = tk.Label(
-                    header,
-                    text=t("settings_subtitle"),
-                    bg=bg,
-                    fg=muted,
-                    font=("Segoe UI", 10),
-                    anchor="w",
-                )
-                header_subtitle.grid(row=1, column=1, sticky="w", pady=(2, 0))
-                hotkey_badge = tk.Label(
-                    header,
-                    text=t("hotkey_badge"),
-                    bg="#1e293b",
-                    fg="#c7d2fe",
-                    font=("Segoe UI Semibold", 9),
-                    padx=12,
-                    pady=7,
-                )
-                hotkey_badge.grid(row=0, column=2, rowspan=2, sticky="e")
-
-                body_shell = tk.Frame(root, bg=bg)
-                body_shell.pack(fill="both", expand=True)
-                canvas = tk.Canvas(
-                    body_shell,
-                    bg=bg,
-                    highlightthickness=0,
-                    borderwidth=0,
-                )
-                body_scroll = ttk.Scrollbar(
-                    body_shell,
-                    orient="vertical",
-                    command=canvas.yview,
-                    style="Dikte.Vertical.TScrollbar",
-                )
-                canvas.configure(yscrollcommand=body_scroll.set)
-                canvas.pack(side="left", fill="both", expand=True)
-                body_scroll.pack(side="right", fill="y", padx=(0, 8))
-
-                content = tk.Frame(canvas, bg=bg)
-                content.grid_columnconfigure(0, weight=1, uniform="settings-column")
-                content.grid_columnconfigure(1, weight=1, uniform="settings-column")
-                content_window = canvas.create_window((0, 0), window=content, anchor="nw")
-
-                def resize_content(event: Any) -> None:
-                    canvas.itemconfigure(content_window, width=event.width)
-
-                def update_scroll_region(_event: Any = None) -> None:
-                    canvas.configure(scrollregion=canvas.bbox("all"))
-
-                def scroll_content(event: Any) -> str:
-                    if canvas.bbox("all") and canvas.winfo_height() < content.winfo_reqheight():
-                        canvas.yview_scroll(int(-event.delta / 120), "units")
-                    return "break"
-
-                canvas.bind("<Configure>", resize_content)
-                content.bind("<Configure>", update_scroll_region)
-                canvas.bind_all("<MouseWheel>", scroll_content)
-
-                section_texts: dict[str, tuple[tk.Label, tk.Label]] = {}
-                field_labels: dict[str, tk.Label] = {}
-
-                def create_card(
-                    row: int,
-                    column: int,
-                    title_key: str,
-                    help_key: str,
-                    columnspan: int = 1,
-                ) -> tk.Frame:
-                    outer = tk.Frame(
-                        content,
-                        bg=card,
-                        highlightbackground=border,
-                        highlightthickness=1,
-                    )
-                    left_pad = 30 if column == 0 else 7
-                    right_pad = 30 if column + columnspan == 2 else 7
-                    outer.grid(
-                        row=row,
-                        column=column,
-                        columnspan=columnspan,
-                        sticky="nsew",
-                        padx=(left_pad, right_pad),
-                        pady=(0, 14),
-                    )
-                    outer.grid_columnconfigure(0, weight=1)
-                    title = tk.Label(
-                        outer,
-                        text=t(title_key),
-                        bg=card,
-                        fg=fg,
-                        font=("Segoe UI Semibold", 12),
-                        anchor="w",
-                    )
-                    title.grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
-                    description = tk.Label(
-                        outer,
-                        text=t(help_key),
-                        bg=card,
-                        fg=muted,
-                        font=("Segoe UI", 9),
-                        anchor="w",
-                    )
-                    description.grid(row=1, column=0, sticky="w", padx=18, pady=(2, 12))
-                    section_texts[title_key] = (title, description)
-                    inner = tk.Frame(outer, bg=card)
-                    inner.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 18))
-                    inner.grid_columnconfigure(0, weight=1)
-                    return inner
-
-                def create_field_label(parent: tk.Misc, key: str, row: int, column: int = 0) -> tk.Label:
-                    label = tk.Label(
-                        parent,
-                        text=t(key),
-                        bg=card,
-                        fg="#dbeafe",
-                        font=("Segoe UI Semibold", 9),
-                        anchor="w",
-                    )
-                    label.grid(row=row, column=column, sticky="w", pady=(0, 6))
-                    field_labels[key] = label
-                    return label
-
-                def entry_widget(parent: tk.Misc, show: str | None = None) -> tk.Entry:
-                    return tk.Entry(
-                        parent,
-                        show=show or "",
-                        bg=field,
-                        fg=fg,
-                        insertbackground=fg,
-                        selectbackground="#3730a3",
-                        selectforeground=fg,
-                        relief="flat",
-                        borderwidth=0,
-                        highlightbackground=border,
-                        highlightcolor=accent,
-                        highlightthickness=1,
-                        font=("Segoe UI", 10),
-                    )
-
-                def configure_checkbutton(widget: tk.Checkbutton) -> None:
-                    widget.configure(
-                        bg=card,
-                        fg=fg,
-                        selectcolor=field,
-                        activebackground=card,
-                        activeforeground=fg,
-                        disabledforeground=muted,
-                        highlightthickness=0,
-                        borderwidth=0,
-                        font=("Segoe UI", 9),
-                        cursor="hand2",
-                        anchor="w",
-                    )
-
-                account_card = create_card(
-                    0,
-                    0,
-                    "section_account",
-                    "section_account_help",
-                    columnspan=2,
-                )
-                create_field_label(account_card, "api_key_label", 0)
-                key_row = tk.Frame(account_card, bg=card)
-                key_row.grid(row=1, column=0, sticky="ew")
-                key_row.grid_columnconfigure(0, weight=1)
-                key_entry = entry_widget(key_row, show="•")
-                key_entry.grid(row=0, column=0, sticky="ew", ipady=9)
-                key_entry.insert(0, old_key)
-                key_entry.selection_range(0, tk.END)
-                key_toggle = tk.Button(
-                    key_row,
-                    text=t("show_key"),
-                    bg="#273449",
-                    fg=fg,
-                    activebackground="#334155",
-                    activeforeground=fg,
-                    relief="flat",
-                    borderwidth=0,
-                    font=("Segoe UI Semibold", 9),
-                    padx=14,
-                    pady=8,
-                    cursor="hand2",
-                )
-                key_toggle.grid(row=0, column=1, padx=(8, 0))
-                api_help = tk.Label(
-                    account_card,
-                    text=t("api_key_help"),
-                    bg=card,
-                    fg=muted,
-                    font=("Segoe UI", 8),
-                    anchor="w",
-                )
-                api_help.grid(row=2, column=0, sticky="w", pady=(7, 0))
-
-                language_card = create_card(
-                    1,
-                    0,
-                    "section_language",
-                    "section_language_help",
-                    columnspan=2,
-                )
-                language_card.grid_columnconfigure(0, weight=1, uniform="language-field")
-                language_card.grid_columnconfigure(1, weight=1, uniform="language-field")
-                create_field_label(language_card, "ui_language_label", 0, 0)
-                create_field_label(language_card, "dictation_lang_label", 0, 1)
-
-                ui_lang_choices = [
-                    ("auto", "ui_lang_auto"),
-                    ("tr", "ui_lang_tr"),
-                    ("en", "ui_lang_en"),
-                ]
-                current_ui_code = [config_ui_language(existing)]
-                ui_lang_display_var = tk.StringVar()
-                ui_lang_menu = ttk.Combobox(
-                    language_card,
-                    textvariable=ui_lang_display_var,
-                    state="readonly",
-                    style="Dikte.TCombobox",
-                )
-                ui_lang_menu.grid(row=1, column=0, sticky="ew", padx=(0, 7))
-
-                dict_choices = [
-                    ("tr-TR", "dictation_lang_tr"),
-                    ("en-US", "dictation_lang_en_us"),
-                    ("custom", "dictation_lang_custom"),
-                ]
-                configured_dictation = config_language(existing)
-                is_custom_code = configured_dictation not in {"tr-TR", "en-US"}
-                current_dict_code = ["custom" if is_custom_code else configured_dictation]
-                dictation_display_var = tk.StringVar()
-                dictation_frame = tk.Frame(language_card, bg=card)
-                dictation_frame.grid(row=1, column=1, sticky="ew", padx=(7, 0))
-                dictation_frame.grid_columnconfigure(0, weight=1)
-                dict_menu = ttk.Combobox(
-                    dictation_frame,
-                    textvariable=dictation_display_var,
-                    state="readonly",
-                    style="Dikte.TCombobox",
-                )
-                dict_menu.grid(row=0, column=0, sticky="ew")
-                custom_lang_entry = entry_widget(dictation_frame)
-                custom_lang_entry.grid(row=1, column=0, sticky="ew", pady=(8, 0), ipady=9)
-                custom_lang_entry.insert(0, configured_dictation if is_custom_code else "")
-                custom_lang_help = tk.Label(
-                    dictation_frame,
-                    text=t("custom_lang_placeholder"),
-                    bg=card,
-                    fg=muted,
-                    font=("Segoe UI", 8),
-                    anchor="w",
-                )
-                custom_lang_help.grid(row=2, column=0, sticky="w", pady=(5, 0))
-                if not is_custom_code:
-                    custom_lang_entry.grid_remove()
-                    custom_lang_help.grid_remove()
-
-                audio_card = create_card(2, 0, "section_audio", "section_audio_help")
-                create_field_label(audio_card, "microphone_label", 0)
-                mic_device_by_label: dict[str, int | None] = {}
-                selected_device_value = [selected_device]
-                microphone_var = tk.StringVar()
-                mic_menu = ttk.Combobox(
-                    audio_card,
-                    textvariable=microphone_var,
-                    state="readonly",
-                    style="Dikte.TCombobox",
-                )
-                mic_menu.grid(row=1, column=0, sticky="ew")
-                audio_cue_var = tk.BooleanVar(value=config_audio_cue(existing))
-                audio_cue_cb = tk.Checkbutton(
-                    audio_card,
-                    text=t("audio_cue_label"),
-                    variable=audio_cue_var,
-                )
-                configure_checkbutton(audio_cue_cb)
-                audio_cue_cb.grid(row=2, column=0, sticky="ew", pady=(13, 0))
-                startup_var = tk.BooleanVar(value=windows_startup_enabled())
-                startup_cb = tk.Checkbutton(
-                    audio_card,
-                    text=t("startup_label"),
-                    variable=startup_var,
-                )
-                configure_checkbutton(startup_cb)
-                startup_cb.grid(row=3, column=0, sticky="ew", pady=(7, 0))
-
-                behavior_card = create_card(
-                    2,
-                    1,
-                    "section_behavior",
-                    "section_behavior_help",
-                )
-                create_field_label(behavior_card, "mode_label", 0)
-                mode_choices = [
-                    ("SMART", "mode_smart"),
-                    ("VERBATIM", "mode_verbatim"),
-                ]
-                current_mode_code = [config_mode(existing)]
-                mode_display_var = tk.StringVar()
-                mode_menu = ttk.Combobox(
-                    behavior_card,
-                    textvariable=mode_display_var,
-                    state="readonly",
-                    style="Dikte.TCombobox",
-                )
-                mode_menu.grid(row=1, column=0, sticky="ew")
-                create_field_label(behavior_card, "notifications_label", 2)
-                notify_choices = [("all", "notify_all"), ("none", "notify_none")]
-                current_notify_code = [config_notify_mode(existing)]
-                notify_display_var = tk.StringVar()
-                notify_menu = ttk.Combobox(
-                    behavior_card,
-                    textvariable=notify_display_var,
-                    state="readonly",
-                    style="Dikte.TCombobox",
-                )
-                notify_menu.grid(row=3, column=0, sticky="ew")
-
-                vocabulary_card = create_card(
-                    3,
-                    0,
-                    "section_vocabulary",
-                    "section_vocabulary_help",
-                    columnspan=2,
-                )
-                vocabulary_text = tk.Text(
-                    vocabulary_card,
-                    height=5,
-                    bg=field,
-                    fg=fg,
-                    insertbackground=fg,
-                    selectbackground="#3730a3",
-                    selectforeground=fg,
-                    relief="flat",
-                    borderwidth=0,
-                    highlightbackground=border,
-                    highlightcolor=accent,
-                    highlightthickness=1,
-                    font=("Segoe UI", 10),
-                    wrap="word",
-                    padx=10,
-                    pady=9,
-                )
-                vocabulary_text.grid(row=0, column=0, sticky="ew")
-                vocabulary_text.insert("1.0", "\n".join(config_vocabulary(existing)))
-                vocab_help = tk.Label(
-                    vocabulary_card,
-                    text=t("vocabulary_help"),
-                    bg=card,
-                    fg=muted,
-                    font=("Segoe UI", 8),
-                    anchor="w",
-                )
-                vocab_help.grid(row=1, column=0, sticky="w", pady=(7, 0))
-
-                footer = tk.Frame(
-                    root,
-                    bg=surface,
-                    highlightbackground=border,
-                    highlightthickness=1,
-                )
-                footer.pack(fill="x", padx=30, pady=(14, 24))
-                footer.grid_columnconfigure(1, weight=1)
-                status_dot = tk.Label(
-                    footer,
-                    text="●",
-                    bg=surface,
-                    fg=muted,
-                    font=("Segoe UI", 11),
-                )
-                status_dot.grid(row=0, column=0, rowspan=2, padx=(16, 9), pady=13)
-                status_label = tk.Label(
-                    footer,
-                    text=device_error or t("status_default"),
-                    bg=surface,
-                    fg=warning if device_error else muted,
-                    anchor="w",
-                    justify="left",
-                    wraplength=470,
-                    font=("Segoe UI", 9),
-                )
-                status_label.grid(row=0, column=1, sticky="ew", pady=(11, 0))
-                shortcut_label = tk.Label(
-                    footer,
-                    text=t("save_shortcut"),
-                    bg=surface,
-                    fg="#64748b",
-                    anchor="w",
-                    font=("Segoe UI", 8),
-                )
-                shortcut_label.grid(row=1, column=1, sticky="w", pady=(1, 11))
-
-                def request_close() -> None:
-                    if state["validating"]:
-                        state["status_kind"] = "validating"
-                        update_status_display()
-                        return
-                    root.quit()
-
-                close_button = tk.Button(
-                    footer,
-                    text=t("btn_close"),
-                    command=request_close,
-                    bg="#273449",
-                    fg=fg,
-                    activebackground="#334155",
-                    activeforeground=fg,
-                    relief="flat",
-                    borderwidth=0,
-                    font=("Segoe UI Semibold", 9),
-                    padx=17,
-                    pady=9,
-                    cursor="hand2",
-                )
-                close_button.grid(row=0, column=2, rowspan=2, padx=(16, 8), pady=13)
-
-                def update_status_display() -> None:
-                    kind = state["status_kind"]
-                    if kind == "default":
-                        text = device_error or t("status_default")
-                        color = warning if device_error else muted
-                    elif kind == "unsaved":
-                        text = t("status_unsaved")
-                        color = warning
-                    elif kind == "validating":
-                        text = t("status_validating")
-                        color = accent
-                    elif kind == "success":
-                        text = t("status_success")
-                        color = success
-                    else:
-                        text = state["error_msg"] or t("status_default")
-                        color = error
-                    status_label.configure(text=text, fg=color)
-                    status_dot.configure(fg=color)
-
-                def mark_changed(*_args: Any) -> None:
-                    if state["validating"] or state["updating"]:
-                        return
-                    state["dirty"] = True
-                    state["status_kind"] = "unsaved"
-                    state["error_msg"] = ""
-                    save_button.configure(state="normal", text=t("btn_save"))
-                    close_button.configure(text=t("btn_cancel"))
-                    update_status_display()
-
-                def toggle_key_visibility() -> None:
-                    state["key_visible"] = not state["key_visible"]
-                    key_entry.configure(show="" if state["key_visible"] else "•")
-                    key_toggle.configure(
-                        text=t("hide_key" if state["key_visible"] else "show_key")
-                    )
-
-                key_toggle.configure(command=toggle_key_visibility)
-
-                def get_effective_dictation_lang() -> str:
-                    if current_dict_code[0] == "custom":
-                        return custom_lang_entry.get().strip() or "tr-TR"
-                    return current_dict_code[0]
-
-                def update_mic_options() -> None:
-                    nonlocal mic_device_by_label
-                    mic_device_by_label = {}
-                    for idx, label in raw_devices:
-                        display_label = t("mic_default") if idx is None else label
-                        mic_device_by_label[display_label] = idx
-                    selected_label = next(
-                        (
-                            label
-                            for label, idx in mic_device_by_label.items()
-                            if idx == selected_device_value[0]
-                        ),
-                        t("mic_default"),
-                    )
-                    mic_menu.configure(values=list(mic_device_by_label))
-                    microphone_var.set(selected_label)
-
-                def refresh_ui_texts() -> None:
-                    state["updating"] = True
-                    try:
-                        root.title(t("settings_title"))
-                        header_subtitle.configure(text=t("settings_subtitle"))
-                        hotkey_badge.configure(text=t("hotkey_badge"))
-                        help_keys = {
-                            "section_account": "section_account_help",
-                            "section_language": "section_language_help",
-                            "section_audio": "section_audio_help",
-                            "section_behavior": "section_behavior_help",
-                            "section_vocabulary": "section_vocabulary_help",
-                        }
-                        for key, (title_label, description_label) in section_texts.items():
-                            title_label.configure(text=t(key))
-                            description_label.configure(text=t(help_keys[key]))
-                        for key, label in field_labels.items():
-                            label.configure(text=t(key))
-                        api_help.configure(text=t("api_key_help"))
-                        custom_lang_help.configure(text=t("custom_lang_placeholder"))
-                        vocab_help.configure(text=t("vocabulary_help"))
-                        audio_cue_cb.configure(text=t("audio_cue_label"))
-                        startup_cb.configure(text=t("startup_label"))
-                        shortcut_label.configure(text=t("save_shortcut"))
-                        key_toggle.configure(
-                            text=t("hide_key" if state["key_visible"] else "show_key")
-                        )
-
-                        ui_lang_menu.configure(values=[t(key) for _, key in ui_lang_choices])
-                        ui_lang_menu.current(
-                            next(
-                                (
-                                    index
-                                    for index, (code, _key) in enumerate(ui_lang_choices)
-                                    if code == current_ui_code[0]
-                                ),
-                                0,
-                            )
-                        )
-                        dict_menu.configure(values=[t(key) for _, key in dict_choices])
-                        dict_menu.current(
-                            next(
-                                index
-                                for index, (code, _key) in enumerate(dict_choices)
-                                if code == current_dict_code[0]
-                            )
-                        )
-                        mode_menu.configure(values=[t(key) for _, key in mode_choices])
-                        mode_menu.current(
-                            next(
-                                index
-                                for index, (code, _key) in enumerate(mode_choices)
-                                if code == current_mode_code[0]
-                            )
-                        )
-                        notify_menu.configure(values=[t(key) for _, key in notify_choices])
-                        notify_menu.current(
-                            next(
-                                index
-                                for index, (code, _key) in enumerate(notify_choices)
-                                if code == current_notify_code[0]
-                            )
-                        )
-                        update_mic_options()
-                        if not state["validating"]:
-                            save_button.configure(text=t("btn_save"))
-                            close_button.configure(
-                                text=t("btn_cancel") if state["dirty"] else t("btn_close")
-                            )
-                        update_status_display()
-                    finally:
-                        state["updating"] = False
-
-                def select_ui_lang(_event: Any = None) -> None:
-                    index = ui_lang_menu.current()
-                    if index < 0:
-                        return
-                    current_ui_code[0] = ui_lang_choices[index][0]
-                    current_ui_lang[0] = resolve_ui_language(
-                        {
-                            "ui_language": current_ui_code[0],
-                            "language": get_effective_dictation_lang(),
-                        }
-                    )
-                    refresh_ui_texts()
-                    mark_changed()
-
-                def select_dict_lang(_event: Any = None) -> None:
-                    index = dict_menu.current()
-                    if index < 0:
-                        return
-                    current_dict_code[0] = dict_choices[index][0]
-                    if current_dict_code[0] == "custom":
-                        custom_lang_entry.grid()
-                        custom_lang_help.grid()
-                        custom_lang_entry.focus_set()
-                    else:
-                        custom_lang_entry.grid_remove()
-                        custom_lang_help.grid_remove()
-                    update_scroll_region()
-                    mark_changed()
-
-                def select_mode(_event: Any = None) -> None:
-                    index = mode_menu.current()
-                    if index >= 0:
-                        current_mode_code[0] = mode_choices[index][0]
-                        mark_changed()
-
-                def select_notify(_event: Any = None) -> None:
-                    index = notify_menu.current()
-                    if index >= 0:
-                        current_notify_code[0] = notify_choices[index][0]
-                        mark_changed()
-
-                def select_microphone(_event: Any = None) -> None:
-                    selected_device_value[0] = mic_device_by_label.get(microphone_var.get())
-                    mark_changed()
-
-                def validation_worker(
-                    key: str,
-                    candidate: dict[str, Any],
-                    startup_enabled: bool,
-                ) -> None:
-                    try:
-                        validate_api_key(key, candidate)
-                        save_setup_config(key, candidate)
-                    except Exception as exc:
-                        result_queue.put(("error", str(exc)))
-                        return
-                    try:
-                        set_windows_startup_enabled(startup_enabled)
-                    except Exception as exc:
-                        result_queue.put(("partial", str(exc)))
-                        return
-                    result_queue.put(("success", ""))
-
-                def poll_validation() -> None:
-                    try:
-                        result, message = result_queue.get_nowait()
-                    except queue.Empty:
-                        if state["validating"]:
-                            root.after(100, poll_validation)
-                        return
-
-                    state["validating"] = False
-                    if result == "error":
-                        state["status_kind"] = "error"
-                        state["error_msg"] = message
-                        save_button.configure(state="normal", text=t("btn_save"))
-                        close_button.configure(state="normal", text=t("btn_cancel"))
-                        update_status_display()
-                        return
-
-                    state["dirty"] = False
-                    if result == "partial":
-                        state["status_kind"] = "error"
-                        state["error_msg"] = f"{t('status_success')} ({message})"
-                    else:
-                        state["status_kind"] = "success"
-                    save_button.configure(state="disabled", text=t("btn_save"))
-                    close_button.configure(state="normal", text=t("btn_close"))
-                    update_status_display()
-
-                def save_settings() -> None:
-                    if state["validating"]:
-                        return
-                    key = key_entry.get().strip() or old_key
-                    if not key:
-                        state["status_kind"] = "error"
-                        state["error_msg"] = t("status_empty_key")
-                        update_status_display()
-                        key_entry.focus_set()
-                        return
-
-                    updates = {
-                        "ui_language": current_ui_code[0],
-                        "language": get_effective_dictation_lang(),
-                        "mode": current_mode_code[0],
-                        "custom_vocabulary": vocabulary_text.get("1.0", tk.END).splitlines(),
-                        "notify_mode": current_notify_code[0],
-                        "audio_cue": bool(audio_cue_var.get()),
-                        "input_device": selected_device_value[0],
-                    }
-                    try:
-                        candidate = build_setup_config(existing, updates)
-                    except Exception as exc:
-                        state["status_kind"] = "error"
-                        state["error_msg"] = str(exc)
-                        update_status_display()
-                        return
-
-                    state["validating"] = True
-                    state["status_kind"] = "validating"
-                    state["error_msg"] = ""
-                    update_status_display()
-                    save_button.configure(state="disabled", text=t("btn_validating"))
-                    close_button.configure(state="disabled")
-                    threading.Thread(
-                        target=validation_worker,
-                        args=(key, candidate, bool(startup_var.get())),
-                        daemon=True,
-                    ).start()
-                    root.after(100, poll_validation)
-
-                save_button = tk.Button(
-                    footer,
-                    text=t("btn_save"),
-                    command=save_settings,
-                    bg=accent,
-                    fg="white",
-                    activebackground=accent_hover,
-                    activeforeground="white",
-                    disabledforeground="#a5b4fc",
-                    relief="flat",
-                    borderwidth=0,
-                    font=("Segoe UI Semibold", 9),
-                    padx=18,
-                    pady=9,
-                    cursor="hand2",
-                )
-                save_button.grid(row=0, column=3, rowspan=2, padx=(0, 13), pady=13)
-
-                ui_lang_menu.bind("<<ComboboxSelected>>", select_ui_lang)
-                dict_menu.bind("<<ComboboxSelected>>", select_dict_lang)
-                mode_menu.bind("<<ComboboxSelected>>", select_mode)
-                notify_menu.bind("<<ComboboxSelected>>", select_notify)
-                mic_menu.bind("<<ComboboxSelected>>", select_microphone)
-                key_entry.bind("<KeyRelease>", mark_changed)
-                custom_lang_entry.bind("<KeyRelease>", mark_changed)
-                vocabulary_text.bind("<KeyRelease>", mark_changed)
-                audio_cue_var.trace_add("write", mark_changed)
-                startup_var.trace_add("write", mark_changed)
-
-                refresh_ui_texts()
-                root.protocol("WM_DELETE_WINDOW", request_close)
-                root.bind("<Escape>", lambda _event: request_close())
-                root.bind("<Control-Return>", lambda _event: save_settings())
-                show_window(t("settings_title"), 920, 780, min_width=760, min_height=620)
-                root.after(80, key_entry.focus_force)
-                root.mainloop()
-                return
-
-            if subcmd == "doctor":
-                report, failed = doctor_report()
-                ui_lang = resolve_ui_language(load_config_best_effort())
-                show_report(get_translation(ui_lang, "doctor_title"), report, warning=failed)
-                return
-
-            show_report(
-                "AI Dikte",
-                f"Unsupported tray command: {subcmd}",
-                warning=True,
-            )
-    except SystemExit:
-        ui_lang = resolve_ui_language(load_config_best_effort())
-        msg = (
-            "Başka bir AI Dikte komutu zaten çalışıyor."
-            if ui_lang == "tr"
-            else "Another AI Dikte command is already running."
-        )
-        show_report("AI Dikte", msg, warning=True)
-    except Exception as exc:
-        show_report("AI Dikte", str(exc), warning=True)
-    finally:
-        try:
-            root.destroy()
-        except tk.TclError:
-            pass
+    return show_dialog(subcmd, SimpleNamespace(**globals()))
 
 
 def run_daemon() -> None:
@@ -3488,12 +2334,7 @@ def run_daemon() -> None:
         def on_copy_diagnostics_clicked(icon, item):
             try:
                 copy_doctor_report()
-                ui_lang = resolve_ui_language(load_config_best_effort())
-                msg = (
-                    "Tanılama bilgileri panoya kopyalandı."
-                    if ui_lang == "tr"
-                    else "Diagnostics copied to clipboard."
-                )
+                msg = "Diagnostics copied to clipboard."
                 notify("AI Dikte", msg)
             except Exception as exc:
                 notify("AI Dikte", str(exc), "critical", event_type="error")
@@ -3503,15 +2344,7 @@ def run_daemon() -> None:
                 new_state = not windows_startup_enabled()
                 set_windows_startup_enabled(new_state)
                 icon.update_menu()
-                ui_lang = resolve_ui_language(load_config_best_effort())
-                if ui_lang == "tr":
-                    msg = (
-                        "Windows ile başlatma etkinleştirildi."
-                        if new_state
-                        else "Windows ile başlatma devre dışı bırakıldı."
-                    )
-                else:
-                    msg = f"Start with Windows {'enabled' if new_state else 'disabled'}."
+                msg = f"Start with Windows {'enabled' if new_state else 'disabled'}."
                 notify("AI Dikte", msg)
             except OSError as exc:
                 notify("AI Dikte", str(exc), "critical", event_type="error")
@@ -3526,12 +2359,7 @@ def run_daemon() -> None:
         def run_child_cmd(subcmd: str):
             existing = tray_children.get(subcmd)
             if existing is not None and existing.poll() is None:
-                ui_lang = resolve_ui_language(load_config_best_effort())
-                msg = (
-                    f"{subcmd.title()} penceresi zaten açık."
-                    if ui_lang == "tr"
-                    else f"{subcmd.title()} is already open."
-                )
+                msg = f"{subcmd.title()} is already open."
                 notify("AI Dikte", msg)
                 return
 
@@ -3545,71 +2373,48 @@ def run_daemon() -> None:
                     event_type="error",
                 )
 
-        def get_current_ui_lang():
-            return resolve_ui_language(load_config_best_effort())
-
-        def tr(key: str, **kw: Any) -> str:
-            return get_translation(get_current_ui_lang(), key, **kw)
-
         menu_items = [
-            pystray.MenuItem(lambda _item: tr("tray_toggle"), on_toggle_clicked, default=True),
-            pystray.MenuItem(lambda _item: tr("tray_setup"), lambda: run_child_cmd("setup")),
-            pystray.MenuItem(lambda _item: tr("tray_doctor"), lambda: run_child_cmd("doctor")),
+            pystray.MenuItem(f"Toggle Dictation ({hotkey})", on_toggle_clicked, default=True),
+            pystray.MenuItem('Settings', lambda: run_child_cmd("setup")),
+            pystray.MenuItem('Doctor', lambda: run_child_cmd("doctor")),
         ]
         if IS_WINDOWS:
             menu_items.extend(
                 [
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem(
-                        lambda _item: tr(
-                            "tray_microphone",
-                            mic=microphone_label(load_config_best_effort(), get_current_ui_lang()),
-                        ),
+                        lambda _item: 'Microphone: {mic}'.format(mic=microphone_label(load_config_best_effort())),
                         None,
                         enabled=False,
                     ),
                     pystray.MenuItem(
-                        lambda _item: tr("tray_model", model=MODEL),
+                        lambda _item: 'Model: {model}'.format(model=MODEL),
                         None,
                         enabled=False,
                     ),
-                    pystray.MenuItem(lambda _item: tr("tray_logs"), on_open_logs_clicked),
-                    pystray.MenuItem(lambda _item: tr("tray_copy_diag"), on_copy_diagnostics_clicked),
+                    pystray.MenuItem('Open Logs', on_open_logs_clicked),
+                    pystray.MenuItem('Copy Diagnostics', on_copy_diagnostics_clicked),
                     pystray.MenuItem(
-                        lambda _item: tr("tray_startup"),
+                        'Start with Windows',
                         on_startup_clicked,
                         checked=lambda _item: windows_startup_enabled(),
                     ),
-                    pystray.MenuItem(lambda _item: tr("tray_restart"), on_restart_clicked),
+                    pystray.MenuItem('Restart', on_restart_clicked),
                 ]
             )
         menu_items.extend([
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(lambda _item: tr("tray_exit"), on_exit_clicked),
+            pystray.MenuItem('Exit', on_exit_clicked),
         ])
         menu = pystray.Menu(*menu_items)
 
-        init_ui_lang = get_current_ui_lang()
         tray_icon = pystray.Icon(
             "ai-dikte",
             images["blue"],
-            get_translation(init_ui_lang, "tray_ready") if IS_WINDOWS else f"AI Dikte — Hazır ({hotkey})",
+            f"AI Dikte — Ready ({hotkey})",
             menu,
         )
         _GLOBAL_TRAY_ICON = tray_icon
-
-        if IS_WINDOWS and hasattr(tray_icon, "_on_notify"):
-            orig_on_notify = tray_icon._on_notify
-
-            def patched_on_notify(wparam, lparam):
-                if lparam == 0x0205:  # WM_RBUTTONUP
-                    try:
-                        tray_icon._update_menu()
-                    except Exception:
-                        pass
-                return orig_on_notify(wparam, lparam)
-
-            tray_icon._on_notify = patched_on_notify
 
         def tray_state_monitor():
             current_state = None
@@ -3617,7 +2422,6 @@ def run_daemon() -> None:
             last_config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
             while tray_icon and tray_icon.visible:
                 time.sleep(0.3)
-                ui_lang = get_current_ui_lang()
                 if IS_WINDOWS:
                     current_startup = windows_startup_enabled()
                     current_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
@@ -3625,32 +2429,32 @@ def run_daemon() -> None:
                         last_startup = current_startup
                         last_config_mtime = current_mtime
                         try:
-                            tray_icon._update_menu()
+                            tray_icon.update_menu()
                         except Exception:
                             pass
 
                 if IS_WINDOWS and _WINDOWS_SESSION_CONTROLLER is not None:
                     st = _WINDOWS_SESSION_CONTROLLER.get_state()
                     if st == "recording":
-                        new_state = ("red", get_translation(ui_lang, "tray_recording"))
+                        new_state = ("red", 'AI Dikte — Listening...')
                     elif st == "transcribing":
-                        new_state = ("yellow", get_translation(ui_lang, "tray_transcribing"))
+                        new_state = ("yellow", 'AI Dikte — Transcribing...')
                     elif st == "starting":
-                        new_state = ("yellow", get_translation(ui_lang, "tray_starting"))
+                        new_state = ("yellow", 'AI Dikte — Starting...')
                     else:
-                        new_state = ("blue", get_translation(ui_lang, "tray_ready"))
+                        new_state = ("blue", f"AI Dikte — Ready ({hotkey})")
                 else:
                     pid = read_pid()
                     is_active = bool(pid and session_matches(pid))
                     if is_active:
                         if STOP_FILE.exists():
-                            new_state = ("yellow", get_translation(ui_lang, "tray_transcribing"))
+                            new_state = ("yellow", 'AI Dikte — Transcribing...')
                         elif READY_FILE.exists():
-                            new_state = ("red", get_translation(ui_lang, "tray_recording"))
+                            new_state = ("red", 'AI Dikte — Listening...')
                         else:
-                            new_state = ("yellow", get_translation(ui_lang, "tray_starting"))
+                            new_state = ("yellow", 'AI Dikte — Starting...')
                     else:
-                        new_state = ("blue", get_translation(ui_lang, "tray_ready"))
+                        new_state = ("blue", f"AI Dikte — Ready ({hotkey})")
 
                 if new_state != current_state and tray_icon:
                     current_state = new_state
@@ -3659,11 +2463,12 @@ def run_daemon() -> None:
                         tray_icon.title = new_state[1]
                     except Exception:
                         pass
-        monitor_thread = threading.Thread(target=tray_state_monitor, daemon=True)
-        monitor_thread.start()
+        def tray_setup(icon):
+            icon.visible = True
+            threading.Thread(target=tray_state_monitor, daemon=True).start()
 
         print("[OK] System Tray icon active.")
-        tray_icon.run()
+        tray_icon.run(setup=tray_setup)
     except ImportError:
         print(
             "[INFO] pystray/Pillow not installed. "
@@ -3706,7 +2511,7 @@ def doctor() -> None:
         if name in ("direct-typing", "direct-typing (SendInput)") and driver:
             suffix = f" ({driver})"
         elif name == "microphone":
-            suffix = f" ({microphone_label(config, resolve_ui_language(config))})"
+            suffix = f" ({microphone_label(config)})"
         else:
             suffix = ""
         status_mark = "[OK]" if ok else "[FAIL]"
@@ -3764,6 +2569,10 @@ def main() -> None:
 
     if command in ("daemon", "run"):
         run_daemon()
+        return
+
+    if IS_WINDOWS and command == "setup":
+        setup()
         return
 
     with FileLock(LOCK_FILE):

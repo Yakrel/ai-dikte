@@ -10,7 +10,7 @@ Shortcut (Meta+Z / Win+Z) → speak → Shortcut → Gemini 3.5 Transcribe Live 
 
 The UI stays toggle-based: press once to start recording, press again to finish, then the final transcription is typed directly into the focused field in one shot. Audio is streamed to Gemini while recording, but interim text is never typed on screen.
 
-**The clipboard is never read or modified.**
+**Dictation never reads or modifies the clipboard.** The explicit “Copy Diagnostics” action copies diagnostic information only.
 
 ---
 
@@ -146,7 +146,11 @@ Example Windows configuration:
 
 On Windows, right-click the tray icon to configure the validated API key, language, mode, microphone, vocabulary, sounds, notifications, and sign-in startup. The same menu exposes Doctor, current microphone/model status, logs, copyable diagnostics, restart, and exit actions.
 
-Setup validates the exact Gemini Live model connection before replacing the working key or saving any preference. A failed key, quota, model-access, or network check leaves the prior configuration intact.
+The interface is English-only. Setup offers Turkish (`tr-TR`), English (`en-US`), or another dictation language code on both Windows and Linux; the language can be changed later. Windows installer, first launch, and tray settings use the same window. Canceling initial setup does not start dictation.
+
+First setup and changes to the API key, dictation language, transcription mode, or vocabulary validate the Gemini Live connection before saving. Local microphone, sound, notification, and startup preferences do not require a network check.
+
+Final transcript segments are appended in order, including intentional repetitions. The app waits for turn completion and pending final text; a timeout or premature disconnect reports an error instead of silently typing an incomplete result. SMART mode can still clean up repetitions on the server; use VERBATIM for literal dictation.
 
 ### Commands
 
