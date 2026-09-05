@@ -10,7 +10,7 @@ Shortcut (Meta+Z / Win+Z) → speak → Shortcut → Gemini 3.5 Transcribe Live 
 
 The UI stays toggle-based: press once to start recording, press again to finish, then the final transcription is typed directly into the focused field in one shot. Audio is streamed to Gemini while recording, but interim text is never typed on screen.
 
-**The clipboard is never read or modified.**
+**Dictation never reads or modifies the clipboard.** The explicit “Copy Diagnostics” action copies diagnostic information only.
 
 ---
 
@@ -51,7 +51,7 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-The installer does **not** build on the local computer. It downloads the `latest` CI-built `ai-dikte-windows.exe` and its SHA-256 checksum, verifies both the checksum and frozen-runtime self-test, then replaces the installed executable under `%LOCALAPPDATA%\Programs\AI-Dikte`. A failed download never deletes a working verified installation. Python and pip are not required for the normal Windows installation; a Python/source fallback is used only when no verified executable is available.
+The installer does **not** build on the local computer. It downloads the `latest` CI-built `ai-dikte-windows.exe` and its SHA-256 checksum, verifies both the checksum and frozen-runtime self-test, then replaces the installed executable under `%LOCALAPPDATA%\Programs\AI-Dikte`. Any download, checksum, self-test, setup or diagnostic failure stops installation with an error. A failed download leaves existing files untouched but is never reported as a successful update. There is no automatic Python/pip installation or reuse of an older executable.
 
 #### Standalone Executable (.exe)
 
@@ -146,13 +146,17 @@ Example Windows configuration:
 
 On Windows, right-click the tray icon to configure the validated API key, language, mode, microphone, vocabulary, sounds, notifications, and sign-in startup. The same menu exposes Doctor, current microphone/model status, logs, copyable diagnostics, restart, and exit actions.
 
-Setup validates the exact Gemini Live model connection before replacing the working key or saving any preference. A failed key, quota, model-access, or network check leaves the prior configuration intact.
+The interface is English-only. Setup offers Turkish (`tr-TR`), English (`en-US`), or another dictation language code on both Windows and Linux; the language can be changed later. Windows installer, first launch, tray settings and Linux `setup` use the same Tk window. Linux also has an **AI Dikte Settings** application-menu entry; it uses the default PipeWire microphone. Windows-only microphone selection, recording sounds and sign-in startup controls are hidden on Linux. Canceling initial setup does not start dictation.
+
+First setup and changes to the API key, dictation language, transcription mode, or vocabulary validate the Gemini Live connection before saving. Local microphone, sound, notification, and startup preferences do not require a network check.
+
+Final transcript segments are appended in order, including intentional repetitions. The app waits for turn completion and pending final text; a timeout or premature disconnect reports an error instead of silently typing an incomplete result. SMART mode can still clean up repetitions on the server; use VERBATIM for literal dictation.
 
 ### Commands
 
 ```bash
 ai-dikte toggle            # Toggle dictation (start/stop)
-ai-dikte daemon            # Run background hotkey listener & system tray
+ai-dikte daemon            # Windows only: hotkey listener & system tray
 ai-dikte setup             # Configure API key and preferences
 ai-dikte doctor            # Run diagnostic checks
 ai-dikte shortcut-install  # Install Hyprland shortcut (Linux)
@@ -168,6 +172,25 @@ ai-dikte --self-test
 
 ---
 
+## Runtime structure and errors
+
+- `ai_dikte.py`: one entrypoint for source and EXE builds, without `runpy`.
+- `ai_dikte_core.py`: recording/session orchestration and desktop integration.
+- `ai_dikte_config.py`: settings validation and persistence.
+- `ai_dikte_ui.py`: shared Tk settings/diagnostics with explicit service callbacks.
+- `ai_dikte_win32.py`: Windows credentials, SendInput, Win+Z and recording overlay.
+
+The recording path is explicit: Windows uses SoundDevice, Linux uses PipeWire.
+Hyprland uses wtype and KDE uses kwtype; a failed backend never switches to the
+other one. Missing tray, recorder or overlay dependencies report an error.
+Linux uses the desktop Meta+Z binding; there is no separate keyboard-hook daemon.
+The Linux settings window requires Tk and XWayland in the supported Wayland sessions.
+
+For intentional source development (not an installer fallback): install dependencies
+with `python -m pip install -r requirements.txt` in a virtual environment, then run
+`python ai_dikte.py setup`. Linux still needs the packaged PipeWire/desktop tools.
+
+
 ## CI Maintenance
 
 GitHub Actions artifacts are retained for 7 days. A scheduled cleanup workflow runs daily and keeps only the newest 5 completed runs for each workflow, so old build logs and artifacts do not accumulate indefinitely.
@@ -178,7 +201,7 @@ GitHub Actions artifacts are retained for 7 days. A scheduled cleanup workflow r
 
 ### Windows
 
-1. Exit AI Dikte from the tray, then delete `%LOCALAPPDATA%\Programs\AI-Dikte` (or `%LOCALAPPDATA%\ai-dikte` for a Python fallback installation) and `%APPDATA%\ai-dikte`.
+1. Exit AI Dikte from the tray, then delete `%LOCALAPPDATA%\Programs\AI-Dikte` and `%APPDATA%\ai-dikte`.
 2. Remove `AI-Dikte` from **Windows Settings → Apps → Startup** (or Registry Run key) and delete `AI Dikte.lnk` from your Start Menu.
 3. Open Windows Credential Manager → **Windows Credentials** and remove `Yakrel/AI-Dikte/GoogleAI`.
 4. Remove the AI Dikte install directory from your User PATH if desired.

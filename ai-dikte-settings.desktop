@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=AI Dikte Settings
+Comment=Configure AI dictation
+Exec=/usr/bin/ai-dikte setup
+TryExec=/usr/bin/ai-dikte
+Terminal=false
+Categories=Utility;

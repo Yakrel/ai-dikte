@@ -1,40 +1,12 @@
 #!/usr/bin/env python3
-"""Windows & cross-platform entrypoint for AI Dikte."""
-
+"""Single application entrypoint for the source install and frozen executable."""
 from __future__ import annotations
-
-# Keep imports used by the bundled `ai-dikte` data script visible to PyInstaller.
-# The shared runtime is executed with runpy, so PyInstaller cannot discover its
-# imports by statically analysing that file when it is added via --add-data.
-import asyncio
-import base64
-import getpass
-import json
 import os
-import queue
-import runpy
-import shutil
-import signal
-import subprocess
 import sys
-import tempfile
-import threading
-import time
-import traceback
 from pathlib import Path
-from urllib.parse import quote
 
-# These imports are also performed dynamically by the shared Windows runtime.
-# Importing them here ensures the frozen build contains the corresponding
-# standard-library modules and Tk runtime used by the OSD.
-if sys.platform == "win32":
-    import ctypes
-    import msvcrt
-    import tkinter  # noqa: F401
-    from tkinter import ttk as _ttk  # noqa: F401
-    import winsound  # noqa: F401
-    from ctypes import wintypes  # noqa: F401
-
+VERSION = "0.4.0"
+_DAEMON_MUTEX_HANDLE = None
 
 def init_windows_console() -> None:
     if sys.platform != "win32":
@@ -64,32 +36,6 @@ def init_windows_console() -> None:
     except Exception:
         pass
 
-
-init_windows_console()
-
-VERSION = "0.4.0"
-_DAEMON_MUTEX_HANDLE = None
-
-
-def bundled_script_path() -> Path:
-    """Return the bundled runtime script in frozen and source builds."""
-    if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).resolve().parent
-        bundle_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
-        return bundle_dir / "ai-dikte"
-    return Path(__file__).resolve().parent / "ai-dikte"
-
-
-def normalize_frozen_child_argv() -> None:
-    """Fix child commands spawned by the source script when running frozen."""
-    if not getattr(sys, "frozen", False) or len(sys.argv) < 3:
-        return
-
-    candidate = Path(sys.argv[1])
-    if candidate.name in {"ai-dikte", "ai_dikte.py"} or str(candidate).endswith("ai-dikte"):
-        sys.argv = [sys.argv[0], *sys.argv[2:]]
-
-
 def acquire_windows_daemon_mutex(command: str | None) -> bool:
     """Ensure only one background hotkey daemon runs in a Windows user session."""
     global _DAEMON_MUTEX_HANDLE
@@ -101,6 +47,8 @@ def acquire_windows_daemon_mutex(command: str | None) -> bool:
 
     ERROR_ALREADY_EXISTS = 183
     kernel32 = ctypes.windll.kernel32
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     handle = kernel32.CreateMutexW(None, False, "Local\\AI-Dikte-Daemon")
     if not handle:
@@ -116,173 +64,68 @@ def acquire_windows_daemon_mutex(command: str | None) -> bool:
     return True
 
 
-def independent_frozen_env() -> dict[str, str] | None:
-    """Start a new one-file app instance with its own extraction directory."""
-    if not getattr(sys, "frozen", False):
-        return None
-    child_env = os.environ.copy()
-    child_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    return child_env
-
-
-def start_windows_daemon_background(script_path: Path) -> None:
-    """Start the daemon without creating a visible console window."""
-    if sys.platform != "win32":
-        return
-
-    CREATE_NO_WINDOW = 0x08000000
-    DETACHED_PROCESS = 0x00000008
-
-    if getattr(sys, "frozen", False):
-        cmd = [sys.executable, "daemon"]
-    else:
-        cmd = [sys.executable, str(script_path), "daemon"]
-
-    subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
-        env=independent_frozen_env(),
-        close_fds=True,
-    )
-
-
-def windows_first_run_setup(script_path: Path) -> bool:
-    """Make a directly downloaded Windows EXE useful on first double-click."""
-    if sys.platform != "win32" or len(sys.argv) != 1:
-        return False
-
-    namespace = runpy.run_path(str(script_path), run_name="_ai_dikte_first_run")
-    if namespace["load_api_key"](required=False):
-        return False
-
-    namespace["run_tray_gui_command"]("setup")
-    if not namespace["load_api_key"](required=False):
-        return True
-    start_windows_daemon_background(script_path)
-    return True
-
-
 def runtime_self_test() -> int:
-    """Verify the frozen Windows build contains its runtime dependencies."""
-    failures: list[str] = []
-
-    try:
-        import websockets
-
-        if not callable(getattr(websockets, "connect", None)):
-            failures.append("websockets.connect unavailable")
-    except Exception as exc:  # pragma: no cover - exercised in frozen CI
-        failures.append(f"websockets: {exc}")
-
-    try:
+    import ai_dikte_core as core
+    from ai_dikte_ui import show_dialog
+    import websockets
+    from tkinter import ttk
+    if not callable(websockets.connect) or not callable(show_dialog) or not ttk.Frame:
+        raise RuntimeError("Required runtime modules are missing.")
+    if sys.platform == "win32":
         import sounddevice
-
-        if not hasattr(sounddevice, "RawInputStream"):
-            failures.append("sounddevice.RawInputStream unavailable")
-    except Exception as exc:  # pragma: no cover - exercised in frozen CI
-        failures.append(f"sounddevice: {exc}")
-
-    try:
         import pystray
-
-        if not hasattr(pystray, "Icon"):
-            failures.append("pystray.Icon unavailable")
-    except Exception as exc:  # pragma: no cover - exercised in frozen CI
-        failures.append(f"pystray: {exc}")
-
-    try:
-        from PIL import Image, ImageDraw
-
-        image = Image.new("RGBA", (2, 2), (0, 0, 0, 0))
-        ImageDraw.Draw(image).point((0, 0), fill="white")
-    except Exception as exc:  # pragma: no cover - exercised in frozen CI
-        failures.append(f"Pillow: {exc}")
-
-    script_path = bundled_script_path()
-    if not script_path.is_file():
-        failures.append(f"bundled script missing: {script_path}")
-    else:
-        try:
-            namespace = runpy.run_path(str(script_path), run_name="_ai_dikte_runtime_self_test")
-            if sys.platform == "win32":
-                driver = namespace["available_output_driver"]({})
-                if driver != "sendinput":
-                    failures.append(f"Windows output driver mismatch: {driver}")
-                if namespace["output_text_windows"]("") != "sendinput":
-                    failures.append("SendInput backend self-test failed")
-                if namespace["config_hotkey"]({}) != "win+z":
-                    failures.append("Windows hotkey must be fixed to win+z")
-                config = namespace["build_setup_config"](
-                    {},
-                    {
-                        "mode": "verbatim",
-                        "custom_vocabulary": [" AI Dikte ", "AI Dikte"],
-                        "input_device": None,
-                    },
-                )
-                if config["mode"] != "VERBATIM":
-                    failures.append("setup mode normalization failed")
-                if config["custom_vocabulary"] != ["AI Dikte"]:
-                    failures.append("setup vocabulary normalization failed")
-                if "api_key" in config:
-                    failures.append("Windows config must not contain an API key")
-                if namespace["tray_child_command"]("setup")[-1] != "_tray-setup":
-                    failures.append("tray setup command routing failed")
-                if not callable(namespace.get("run_tray_gui_command")):
-                    failures.append("tray GUI command unavailable")
-                if not callable(namespace.get("write_windows_api_key")):
-                    failures.append("Windows Credential Manager backend unavailable")
-
-            merge_final_segment = namespace.get("merge_final_segment")
-            if not callable(merge_final_segment):
-                failures.append("transcript merge helper unavailable")
-            else:
-                segments: list[str] = []
-                merge_final_segment(segments, "Birinci cümle.")
-                merge_final_segment(segments, "İkinci cümle.")
-                if segments != ["Birinci cümle.", "İkinci cümle."]:
-                    failures.append("final transcript segments are not preserved")
-        except Exception as exc:  # pragma: no cover - exercised in frozen CI
-            failures.append(f"shared runtime: {exc}")
-
-    if failures:
-        for failure in failures:
-            print(f"[FAIL] {failure}", file=sys.stderr)
-        return 1
-
-    mode = "frozen" if getattr(sys, "frozen", False) else "source"
-    print(f"AI Dikte runtime self-test OK ({mode})")
+        from PIL import Image
+        import ai_dikte_win32
+        if not sounddevice.RawInputStream or not pystray.Icon:
+            raise RuntimeError("Required Windows backend is missing.")
+        Image.new("RGBA", (2, 2))
+        if ai_dikte_win32.output_text_windows("") != "sendinput":
+            raise RuntimeError("SendInput self-test failed.")
+    segments = []
+    for text in ("Evet.", "Evet."):
+        core.merge_final_segment(segments, text)
+    if segments != ["Evet.", "Evet."]:
+        raise RuntimeError("Final transcript segments were lost.")
+    print(f"AI Dikte {VERSION}: runtime self-test passed")
     return 0
 
 
 def main() -> None:
-    normalize_frozen_child_argv()
+    init_windows_console()
+    import ai_dikte_core as core
     command = sys.argv[1] if len(sys.argv) > 1 else None
-
-    if command in {"--version", "version"}:
+    if command in ("--version", "version"):
         print(f"AI Dikte {VERSION}")
-        raise SystemExit(0)
-
-    if command in {"--self-test", "self-test"}:
-        raise SystemExit(runtime_self_test())
-
-    script_path = bundled_script_path()
-    if not script_path.is_file():
-        print(f"[ERROR] Could not find bundled ai-dikte script: {script_path}", file=sys.stderr)
-        raise SystemExit(1)
-
-    if windows_first_run_setup(script_path):
         return
-
-    command = sys.argv[1] if len(sys.argv) > 1 else None
+    if command in ("--self-test", "self-test"):
+        raise SystemExit(runtime_self_test())
+    if command is None:
+        if sys.platform == "win32":
+            if not core.load_api_key(required=False):
+                core.setup()
+            command = "daemon"
+        else:
+            command = "setup"
+        sys.argv.append(command)
     if not acquire_windows_daemon_mutex(command):
         return
+    core.main()
 
-    runpy.run_path(str(script_path), run_name="__main__")
+
+def entrypoint() -> None:
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        # A windowed EXE has no console: fatal errors must still be visible.
+        message = f"AI Dikte failed: {exc}"
+        print(message, file=sys.stderr)
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, "AI Dikte — Error", 0x10)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    entrypoint()
