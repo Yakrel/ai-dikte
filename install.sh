@@ -26,7 +26,13 @@ if ! command -v pacman >/dev/null 2>&1; then
     exit 1
 fi
 
-# Detect the active Wayland desktop so only its required typing backend is installed.
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    echo -e "${RED}[ERROR]${NC} AI Dikte supports KDE Plasma Wayland and Omarchy/Hyprland only."
+    echo "X11, GNOME, and other desktop/compositor paths are intentionally unsupported."
+    exit 1
+fi
+
+# Detect the active supported Wayland desktop so only its required typing backend is installed.
 desktop_env="$(printf '%s %s %s' \
     "${XDG_CURRENT_DESKTOP:-}" \
     "${XDG_SESSION_DESKTOP:-}" \
@@ -40,7 +46,7 @@ elif [ -n "${KDE_FULL_SESSION:-}" ] || [[ "$desktop_env" == *kde* ]] || [[ "$des
     TYPING_BACKEND="kwtype"
 else
     echo -e "${RED}[ERROR]${NC} Unsupported desktop session."
-    echo "AI Dikte currently supports Hyprland/Omarchy and KDE Plasma on Wayland."
+    echo "AI Dikte supports KDE Plasma Wayland and Omarchy/Hyprland. GNOME is intentionally unsupported."
     echo "Detected desktop environment: ${desktop_env:-unknown}"
     exit 1
 fi
