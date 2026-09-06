@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -72,10 +74,13 @@ class HardeningTests(unittest.TestCase):
 
     def test_linux_fatal_error_notification_is_best_effort(self) -> None:
         import ai_dikte
+        stderr = io.StringIO()
         with mock.patch.object(ai_dikte.sys, "platform", "linux"), \
              mock.patch.object(ai_dikte.shutil, "which", return_value="/usr/bin/notify-send"), \
-             mock.patch.object(ai_dikte.subprocess, "run", side_effect=OSError("no bus")):
+             mock.patch.object(ai_dikte.subprocess, "run", side_effect=OSError("no bus")), \
+             redirect_stderr(stderr):
             ai_dikte.show_fatal_error("failure")
+        self.assertEqual(stderr.getvalue().strip(), "failure")
 
 
 if __name__ == "__main__":
