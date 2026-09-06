@@ -2,7 +2,7 @@
 Type=Application
 Name=AI Dikte Settings
 Comment=Configure AI dictation
-Exec=/usr/bin/ai-dikte setup
-TryExec=/usr/bin/ai-dikte
+Exec=ai-dikte setup
+TryExec=ai-dikte
 Terminal=false
 Categories=Utility;
