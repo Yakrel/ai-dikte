@@ -97,18 +97,18 @@ makepkg --syncdeps --install --clean --noconfirm --needed
 echo -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"
 echo ""
 
-# Run interactive setup
+# Run initial setup when an interactive terminal is available.
 if [ -t 0 ]; then
     echo -e "${BOLD}${BLUE}==>${NC} Running initial configuration..."
     ai-dikte setup
     echo ""
     echo -e "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-    ai-dikte doctor || true
+    ai-dikte doctor
+    echo ""
+    echo -e "${GREEN}${BOLD}Setup complete!${NC} Press ${BOLD}Meta+Z${NC} to start dictation."
 else
-    echo -e "${BOLD}To configure your Gemini API key, run:${NC}"
+    echo -e "${BOLD}Initial configuration was not run because no interactive terminal is available.${NC}"
+    echo "Installation is complete, but setup is still required:"
     echo "  ai-dikte setup"
     echo "  ai-dikte doctor"
 fi
-
-echo ""
-echo -e "${GREEN}${BOLD}Setup complete!${NC} Press ${BOLD}Meta+Z${NC} to start dictation."
