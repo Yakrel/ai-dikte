@@ -27,6 +27,7 @@ jobs:
           python -m py_compile ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py
           bash -n install.sh
           sh -n ai-dikte ai-dikte-toggle
+          sha256sum ai_dikte_core.py
           xvfb-run -a python -m unittest discover -s tests -v
 
       - name: Build minimal base package
