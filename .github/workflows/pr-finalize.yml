@@ -30,10 +30,10 @@ jobs:
               file = Path(path)
               text = file.read_text(encoding="utf-8")
               if text.count(old) != 1:
-                  raise SystemExit(f"Expected exactly one match in {path}: {old[:80]!r}")
+                  raise SystemExit(f"Expected exactly one match in {path}: {old[:100]!r}")
               file.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          # Configuration: remove compatibility shims for runtime-owned values.
+          # Runtime-owned config values should not have compatibility APIs.
           replace_once("ai_dikte_config.py", 'DEFAULT_HOTKEY = "win+z" if IS_WINDOWS else "SUPER + Z"\n', '')
           replace_once(
               "ai_dikte_config.py",
@@ -41,7 +41,7 @@ jobs:
               '',
           )
 
-          # Core: remove dead imports and make runtime backend selection deterministic.
+          # Core cleanup and deterministic backend selection.
           replace_once("ai_dikte_core.py", "import traceback\n", "")
           replace_once(
               "ai_dikte_core.py",
@@ -68,6 +68,8 @@ jobs:
               '''def output_candidates(config: dict[str, Any] | None = None) -> list[str]:\n    if IS_WINDOWS:\n        return ["sendinput"]\n\n    config = config or load_config(required=False)\n    forced = config_output_driver(config)\n    if forced != "auto":\n        return [forced]\n\n    desktop = desktop_kind()\n    if desktop == "hyprland":\n        return ["wtype"]\n    if desktop == "kde":\n        return ["kwtype"]\n    raise RuntimeError("Unsupported desktop: use KDE Plasma or Hyprland on Wayland.")\n\n\ndef available_output_driver(config: dict[str, Any] | None = None) -> str | None:\n    if IS_WINDOWS:\n        return "sendinput"\n    for driver in output_candidates(config):\n        if shutil.which(driver):\n            return driver\n    return None\n\n\ndef output_text(text: str) -> str:\n    if IS_WINDOWS:\n        return output_text_windows(text)\n    driver = output_candidates()[0]\n''',
               '''def selected_output_driver() -> str:\n    if IS_WINDOWS:\n        return "sendinput"\n\n    desktop = desktop_kind()\n    if desktop == "hyprland":\n        return "wtype"\n    if desktop == "kde":\n        return "kwtype"\n    raise RuntimeError("Unsupported desktop: use KDE Plasma or Hyprland on Wayland.")\n\n\ndef available_output_driver(_config: dict[str, Any] | None = None) -> str | None:\n    if IS_WINDOWS:\n        return "sendinput"\n    driver = selected_output_driver()\n    return driver if shutil.which(driver) else None\n\n\ndef output_text(text: str) -> str:\n    if IS_WINDOWS:\n        return output_text_windows(text)\n    driver = selected_output_driver()\n''',
           )
+
+          # Notifications are ancillary; Hyprland config changes are validated and transactional.
           replace_once(
               "ai_dikte_core.py",
               '''def reload_hyprland() -> None:\n    if shutil.which("hyprctl"):\n        subprocess.run(\n            ["hyprctl", "reload"],\n            stdout=subprocess.DEVNULL,\n            stderr=subprocess.DEVNULL,\n            check=False,\n        )\n''',
@@ -109,7 +111,7 @@ jobs:
               '''    print(f"i desktop/os: {desktop}")\n    if driver_error:\n        print(f"i direct-typing: {driver_error}")\n    print(f"i model: {MODEL}")\n''',
           )
 
-          # Entrypoint: make Linux desktop-launch failures visible without making notifications fatal.
+          # Linux fatal errors from Terminal=false shortcuts should still be visible.
           replace_once("ai_dikte.py", "import os\n", "")
           replace_once("ai_dikte.py", "from pathlib import Path\n", "")
           replace_once("ai_dikte.py", "import sys\n", "import sys\nimport shutil\nimport subprocess\n")
@@ -119,14 +121,14 @@ jobs:
               '''def show_fatal_error(message: str) -> None:\n    print(message, file=sys.stderr)\n    if sys.platform == "win32":\n        import ctypes\n        ctypes.windll.user32.MessageBoxW(None, message, "AI Dikte — Error", 0x10)\n        return\n    if sys.platform.startswith("linux"):\n        notifier = shutil.which("notify-send")\n        if notifier:\n            try:\n                subprocess.run(\n                    [notifier, "-a", "AI Dikte", "-u", "critical", "AI Dikte — Error", message],\n                    stdout=subprocess.DEVNULL,\n                    stderr=subprocess.DEVNULL,\n                    check=False,\n                )\n            except OSError:\n                pass\n\n\ndef entrypoint() -> None:\n    try:\n        main()\n    except KeyboardInterrupt:\n        raise SystemExit(130)\n    except Exception as exc:\n        show_fatal_error(f"AI Dikte failed: {exc}")\n        raise SystemExit(1)\n''',
           )
 
-          # Hyprland binding installation belongs to install/integration, not Settings save.
+          # Desktop integration belongs to installation, not Settings Save.
           replace_once(
               "install.sh",
               '''makepkg --syncdeps --install --clean --noconfirm --needed\n\necho -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"\n''',
               '''makepkg --syncdeps --install --clean --noconfirm --needed\n\nif [ "$DESKTOP_KIND" = "hyprland" ]; then\n    echo -e "${BOLD}${BLUE}==>${NC} Installing and validating Meta+Z Hyprland shortcut..."\n    ai-dikte shortcut-install\nfi\n\necho -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"\n''',
           )
 
-          # Package the UI icon on Linux and mark the script-only base package architecture-neutral.
+          # Package the shared UI icon and make the script-only base package architecture-neutral.
           replace_once("PKGBUILD", "arch=('x86_64')", "arch=('any')")
           replace_once("PKGBUILD", "  'ai-dikte-settings.desktop'\n", "  'ai-dikte-settings.desktop'\n  'ai-dikte.png'\n")
           replace_once(
@@ -137,47 +139,29 @@ jobs:
           replace_once("ai-dikte-settings.desktop", "Terminal=false\n", "Terminal=false\nIcon=ai-dikte\n")
           replace_once("ai-dikte.desktop", "Terminal=false\n", "Terminal=false\nIcon=ai-dikte\n")
 
-          # Tests: update deterministic backend names and cover the new failure isolation contracts.
-          platform = Path("tests/test_platform_scope.py")
-          platform_text = platform.read_text(encoding="utf-8")
-          platform_text = platform_text.replace(
-              '''    def test_stale_backend_config_cannot_override_runtime_selection(self) -> None:\n        expected = "sendinput" if ai_dikte_config.IS_WINDOWS else "auto"\n        self.assertEqual(\n            ai_dikte_config.config_output_driver({"output_driver": "kwtype"}),\n            expected,\n        )\n\n''',
-              '',
-          )
-          platform_text = platform_text.replace('mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="kde"):\n            self.assertEqual(ai_dikte_core.output_candidates({}), ["kwtype"])', 'mock.patch.object(ai_dikte_core, "desktop_kind", return_value="kde"):\n            self.assertEqual(ai_dikte_core.selected_output_driver(), "kwtype")')
-          platform_text = platform_text.replace('mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="hyprland"):\n            self.assertEqual(ai_dikte_core.output_candidates({}), ["wtype"])', 'mock.patch.object(ai_dikte_core, "desktop_kind", return_value="hyprland"):\n            self.assertEqual(ai_dikte_core.selected_output_driver(), "wtype")')
-          platform_text = platform_text.replace('mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="other"):\n            with self.assertRaisesRegex(RuntimeError, "Unsupported desktop"):\n                ai_dikte_core.output_candidates({})', 'mock.patch.object(ai_dikte_core, "desktop_kind", return_value="other"):\n            with self.assertRaisesRegex(RuntimeError, "Unsupported desktop"):\n                ai_dikte_core.selected_output_driver()')
-          if "config_output_driver" in platform_text or "output_candidates" in platform_text:
-              raise SystemExit("Platform tests still reference removed backend compatibility API")
-          platform.write_text(platform_text, encoding="utf-8")
+          # Rewrite the small platform-scope test file explicitly to avoid fragile migration logic.
+          Path("tests/test_platform_scope.py").write_text('''from __future__ import annotations\n\nimport unittest\nfrom pathlib import Path\nfrom unittest import mock\n\nimport ai_dikte_config\nimport ai_dikte_core\n\n\nclass PlatformScopeTests(unittest.TestCase):\n    def test_runtime_owned_fields_are_not_persisted(self) -> None:\n        config = ai_dikte_config.build_setup_config(\n            {\n                "output_driver": "kwtype",\n                "hotkey": "something-else",\n                "language": "tr-TR",\n            }\n        )\n        self.assertNotIn("output_driver", config)\n        self.assertNotIn("hotkey", config)\n\n    def test_kde_wayland_selects_kwtype(self) -> None:\n        with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="kde"):\n            self.assertEqual(ai_dikte_core.selected_output_driver(), "kwtype")\n\n    def test_hyprland_selects_wtype(self) -> None:\n        with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="hyprland"):\n            self.assertEqual(ai_dikte_core.selected_output_driver(), "wtype")\n\n    def test_gnome_is_explicitly_unsupported(self) -> None:\n        with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \\\n             mock.patch.object(ai_dikte_core, "desktop_kind", return_value="other"):\n            with self.assertRaisesRegex(RuntimeError, "Unsupported desktop"):\n                ai_dikte_core.selected_output_driver()\n\n    def test_linux_launchers_do_not_require_usr_bin(self) -> None:\n        root = Path(__file__).resolve().parents[1]\n        for filename in ("ai-dikte", "ai-dikte-toggle", "ai-dikte.desktop", "ai-dikte-settings.desktop"):\n            with self.subTest(filename=filename):\n                text = (root / filename).read_text(encoding="utf-8")\n                self.assertNotIn("/usr/bin/", text)\n\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding="utf-8")
 
+          # Existing runtime contracts reference the old selector only in two focused tests.
           runtime = Path("tests/test_runtime.py")
           runtime_text = runtime.read_text(encoding="utf-8")
-          runtime_text = runtime_text.replace('self.replace_global("output_text", "load_config", lambda required=False: {})\n', '')
-          runtime_text = runtime_text.replace('self.replace_global("output_candidates", "IS_WINDOWS", False)\n        self.replace_global("output_candidates", "desktop_kind", lambda: "hyprland")\n        self.replace_global("output_candidates", "load_config", lambda required=False: {})\n', 'self.replace_global("selected_output_driver", "IS_WINDOWS", False)\n        self.replace_global("selected_output_driver", "desktop_kind", lambda: "hyprland")\n')
-          anchor = '''    def test_linux_daemon_fails_explicitly(self):\n'''
-          additions = '''    def test_linux_notification_failure_is_best_effort(self):\n        self.replace_global("notify", "IS_WINDOWS", False)\n        self.replace_global("notify", "load_config", lambda required=False: {"notify_mode": "all"})\n        log = mock.Mock()\n        self.replace_global("notify", "log_session_event", log)\n        with mock.patch("shutil.which", return_value="/usr/bin/notify-send"), \\\n             mock.patch("subprocess.run", side_effect=OSError("dbus unavailable")):\n            self.runtime["notify"]("AI Dikte", "done")\n        self.assertTrue(log.called)\n\n    def test_settings_save_does_not_modify_hyprland_shortcuts(self):\n        existing = self.runtime["build_setup_config"]({})\n        self.replace_global("save_settings", "load_config", lambda required=False: existing)\n        self.replace_global("save_settings", "load_api_key", lambda required=False: "key")\n        self.replace_global("save_settings", "validate_api_key", mock.Mock())\n        self.replace_global("save_settings", "save_setup_config", mock.Mock())\n        shortcut = mock.Mock(side_effect=AssertionError("settings must not mutate desktop config"))\n        self.replace_global("save_settings", "install_hyprland_shortcut", shortcut)\n        self.runtime["save_settings"]("key", dict(existing, notify_mode="none"))\n        shortcut.assert_not_called()\n\n    def test_hyprland_reload_surfaces_config_errors(self):\n        self.replace_global("reload_hyprland", "IS_WINDOWS", False)\n        responses = [\n            SimpleNamespace(returncode=0, stdout="", stderr=""),\n            SimpleNamespace(returncode=0, stdout="bad lua", stderr=""),\n        ]\n        with mock.patch("shutil.which", return_value="/usr/bin/hyprctl"), \\\n             mock.patch("subprocess.run", side_effect=responses):\n            with self.assertRaisesRegex(RuntimeError, "configuration has errors"):\n                self.runtime["reload_hyprland"]()\n\n'''
-          if anchor not in runtime_text:
-              raise SystemExit("Runtime test insertion anchor missing")
-          runtime_text = runtime_text.replace(anchor, additions + anchor, 1)
-          runtime.write_text(runtime_text, encoding="utf-8")
+          runtime_text = runtime_text.replace('        self.replace_global("output_text", "load_config", lambda required=False: {})\n', '')
+          old = '''        self.replace_global("output_candidates", "IS_WINDOWS", False)\n        self.replace_global("output_candidates", "desktop_kind", lambda: "hyprland")\n        self.replace_global("output_candidates", "load_config", lambda required=False: {})\n'''
+          new = '''        self.replace_global("selected_output_driver", "IS_WINDOWS", False)\n        self.replace_global("selected_output_driver", "desktop_kind", lambda: "hyprland")\n'''
+          if old not in runtime_text:
+              raise SystemExit("Old backend test setup was not found")
+          runtime.write_text(runtime_text.replace(old, new, 1), encoding="utf-8")
 
-          # Verify the Linux fatal-error presenter itself is safe and visible when possible.
-          entry_test = '''\n    def test_linux_fatal_error_notification_is_best_effort(self):\n        import ai_dikte\n        with mock.patch.object(ai_dikte.sys, "platform", "linux"), \\\n             mock.patch.object(ai_dikte.shutil, "which", return_value="/usr/bin/notify-send"), \\\n             mock.patch.object(ai_dikte.subprocess, "run", side_effect=OSError("no bus")):\n            ai_dikte.show_fatal_error("failure")\n'''
-          runtime_text = runtime.read_text(encoding="utf-8")
-          marker = '''    def test_configured_windows_double_click_starts_daemon(self):\n'''
-          if marker not in runtime_text:
-              raise SystemExit("Fatal-error test insertion anchor missing")
-          runtime.write_text(runtime_text.replace(marker, entry_test + "\n" + marker, 1), encoding="utf-8")
+          # New hardening-specific contracts live separately so existing tests stay readable.
+          Path("tests/test_hardening.py").write_text('''from __future__ import annotations\n\nimport importlib\nimport os\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom types import SimpleNamespace\nfrom unittest import mock\n\n\nclass HardeningTests(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls) -> None:\n        cls.temp_dir = tempfile.TemporaryDirectory()\n        root = Path(cls.temp_dir.name)\n        cls.environment = mock.patch.dict(\n            os.environ,\n            {\n                "APPDATA": str(root / "AppData"),\n                "LOCALAPPDATA": str(root / "LocalAppData"),\n                "XDG_CONFIG_HOME": str(root / "config"),\n                "XDG_RUNTIME_DIR": str(root / "runtime"),\n            },\n        )\n        cls.environment.start()\n        import ai_dikte_core\n        cls.core = importlib.reload(ai_dikte_core)\n\n    @classmethod\n    def tearDownClass(cls) -> None:\n        cls.environment.stop()\n        cls.temp_dir.cleanup()\n\n    def test_linux_notification_failure_is_best_effort(self) -> None:\n        with mock.patch.object(self.core, "IS_WINDOWS", False), \\\n             mock.patch.object(self.core, "load_config", return_value={"notify_mode": "all"}), \\\n             mock.patch.object(self.core, "log_session_event") as log, \\\n             mock.patch("shutil.which", return_value="/usr/bin/notify-send"), \\\n             mock.patch("subprocess.run", side_effect=OSError("dbus unavailable")):\n            self.core.notify("AI Dikte", "done")\n        self.assertTrue(log.called)\n\n    def test_settings_save_does_not_modify_hyprland_shortcuts(self) -> None:\n        existing = self.core.build_setup_config({})\n        with mock.patch.object(self.core, "load_config", return_value=existing), \\\n             mock.patch.object(self.core, "load_api_key", return_value="key"), \\\n             mock.patch.object(self.core, "validate_api_key") as validate, \\\n             mock.patch.object(self.core, "save_setup_config") as save, \\\n             mock.patch.object(self.core, "install_hyprland_shortcut") as shortcut:\n            self.core.save_settings("key", dict(existing, notify_mode="none"))\n        validate.assert_not_called()\n        save.assert_called_once()\n        shortcut.assert_not_called()\n\n    def test_hyprland_reload_surfaces_config_errors(self) -> None:\n        responses = [\n            SimpleNamespace(returncode=0, stdout="", stderr=""),\n            SimpleNamespace(returncode=0, stdout="bad lua", stderr=""),\n        ]\n        with mock.patch("shutil.which", return_value="/usr/bin/hyprctl"), \\\n             mock.patch("subprocess.run", side_effect=responses):\n            with self.assertRaisesRegex(RuntimeError, "configuration has errors"):\n                self.core.reload_hyprland()\n\n    def test_doctor_report_contains_unsupported_desktop_failure(self) -> None:\n        with mock.patch.object(self.core, "IS_WINDOWS", False), \\\n             mock.patch.object(self.core, "desktop_kind", return_value="other"):\n            report, ok = self.core.doctor_report()\n        self.assertFalse(ok)\n        self.assertIn("supported-desktop", report)\n\n    def test_linux_fatal_error_notification_is_best_effort(self) -> None:\n        import ai_dikte\n        with mock.patch.object(ai_dikte.sys, "platform", "linux"), \\\n             mock.patch.object(ai_dikte.shutil, "which", return_value="/usr/bin/notify-send"), \\\n             mock.patch.object(ai_dikte.subprocess, "run", side_effect=OSError("no bus")):\n            ai_dikte.show_fatal_error("failure")\n\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding="utf-8")
 
-          # Assert the installed package carries the icon the shared UI resolves beside its modules.
           replace_once(
               ".github/workflows/package.yml",
               '''          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --self-test\n          cd "$GITHUB_WORKSPACE"\n''',
               '''          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --self-test\n          test -f /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai-dikte.png\n          test -f /tmp/ai-dikte-installed/usr/share/icons/hicolor/256x256/apps/ai-dikte.png\n          cd "$GITHUB_WORKSPACE"\n''',
           )
 
-          # Recompute base PKGBUILD hashes after source changes, including the binary icon.
+          # Recompute local-source PKGBUILD hashes, including the binary PNG.
           pkg_path = Path("PKGBUILD")
           pkg = pkg_path.read_text(encoding="utf-8")
           source_match = re.search(r"source=\(\n(.*?)\n\)", pkg, re.S)
@@ -192,14 +176,13 @@ jobs:
                   raise SystemExit(f"PKGBUILD source is not local: {name}")
               sums.append(hashlib.sha256(file.read_bytes()).hexdigest())
           new_sums = "sha256sums=(\n" + "\n".join(f"  '{digest}'" for digest in sums) + "\n)"
-          pkg = pkg[:sums_match.start()] + new_sums + pkg[sums_match.end():]
-          pkg_path.write_text(pkg, encoding="utf-8")
+          pkg_path.write_text(pkg[:sums_match.start()] + new_sums + pkg[sums_match.end():], encoding="utf-8")
           PY
 
       - name: Sanity check
         shell: bash
         run: |
-          python3 -m py_compile ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py
+          python3 -m py_compile ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py tests/test_platform_scope.py tests/test_hardening.py
           bash -n install.sh
           sh -n ai-dikte ai-dikte-toggle
           python3 - <<'PY'
@@ -208,8 +191,10 @@ jobs:
           config = Path('ai_dikte_config.py').read_text()
           assert 'config_output_driver' not in core + config
           assert 'config_hotkey' not in core + config
+          assert 'output_candidates' not in core
           assert '/usr/bin/ai-dikte-toggle' not in core
           assert 'install_hyprland_shortcut()' not in core.split('def save_settings', 1)[1].split('def setup', 1)[0]
+          assert Path('tests/test_hardening.py').is_file()
           PY
 
       - name: Commit hardening
@@ -221,6 +206,6 @@ jobs:
           fi
           git config user.name "Berkay YETGİN"
           git config user.email "85676216+Yakrel@users.noreply.github.com"
-          git add ai_dikte.py ai_dikte_core.py ai_dikte_config.py install.sh PKGBUILD ai-dikte.desktop ai-dikte-settings.desktop tests/test_platform_scope.py tests/test_runtime.py .github/workflows/package.yml
+          git add ai_dikte.py ai_dikte_core.py ai_dikte_config.py install.sh PKGBUILD ai-dikte.desktop ai-dikte-settings.desktop tests/test_platform_scope.py tests/test_runtime.py tests/test_hardening.py .github/workflows/package.yml
           git commit -m "fix: harden desktop integration and failure isolation"
           git push origin HEAD:fix/simplify-settings-and-transcripts
