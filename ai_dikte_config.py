@@ -17,6 +17,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 if IS_WINDOWS:
     from ai_dikte_win32 import read_windows_api_key, write_windows_api_key
 
+
 def load_config(required: bool = True) -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         if required:
@@ -95,24 +96,14 @@ def config_vocabulary(config: dict[str, Any]) -> list[str]:
     return result
 
 
-def config_output_driver(config: dict[str, Any]) -> str:
-    driver = str(config.get("output_driver", "auto")).strip().lower() or "auto"
-    if IS_WINDOWS:
-        if driver not in {"auto", "sendinput"}:
-            raise RuntimeError("Config 'output_driver' on Windows must be auto or sendinput.")
-        return driver
-    if driver not in {"auto", "kwtype", "wtype"}:
-        raise RuntimeError("Config 'output_driver' on Linux must be auto, kwtype, or wtype.")
-    return driver
+def config_output_driver(_config: dict[str, Any]) -> str:
+    """Compatibility shim: output backend is selected by the runtime, never config."""
+    return "sendinput" if IS_WINDOWS else "auto"
 
 
-def config_hotkey(config: dict[str, Any]) -> str:
-    # Win+Z is intentionally fixed on Windows because it must override the
-    # Windows 11 Snap Layout shortcut using the low-level hook.
-    if IS_WINDOWS:
-        return "win+z"
-    value = str(config.get("hotkey", DEFAULT_HOTKEY)).strip()
-    return value or DEFAULT_HOTKEY
+def config_hotkey(_config: dict[str, Any]) -> str:
+    """Compatibility shim: supported platforms use one fixed shortcut."""
+    return DEFAULT_HOTKEY
 
 
 def config_audio_cue(config: dict[str, Any]) -> bool:
@@ -151,18 +142,20 @@ def build_setup_config(
     config = dict(existing)
     if updates:
         config.update(updates)
-    config.pop("ui_language", None)
+
+    # These values are runtime/platform properties, not user preferences.
+    # Drop stale copies so an old or hand-edited config cannot override them.
+    for runtime_owned_key in ("ui_language", "output_driver", "hotkey"):
+        config.pop(runtime_owned_key, None)
+
     config.update(
         {
             "language": config_language(config),
             "mode": config_mode(config),
             "custom_vocabulary": config_vocabulary(config),
-            "output_driver": config_output_driver(config),
-            "hotkey": config_hotkey(config),
             "audio_cue": config_audio_cue(config),
             "notify_mode": config_notify_mode(config),
             "input_device": config_input_device(config),
-
         }
     )
     return config
@@ -183,6 +176,3 @@ def save_setup_config(key: str, config: dict[str, Any] | None = None) -> None:
         config["api_key"] = key
     write_config(config)
     print(f"[OK] Saved: {CONFIG_FILE}")
-
-
-
