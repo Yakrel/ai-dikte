@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/bin/ai-dikte toggle
+exec ai-dikte toggle
