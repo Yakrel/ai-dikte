@@ -1,2 +1,6 @@
 #!/bin/sh
-exec /usr/bin/python /usr/lib/ai-dikte/ai_dikte.py "$@"
+set -eu
+
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+LIB_DIR=$(CDPATH= cd -- "$BIN_DIR/../lib/ai-dikte" && pwd)
+exec python3 "$LIB_DIR/ai_dikte.py" "$@"
