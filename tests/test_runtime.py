@@ -194,6 +194,13 @@ class RuntimeContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Windows-only"):
             self.runtime["run_daemon"]()
 
+    def test_linux_session_recognizes_python_entrypoint(self):
+        self.replace_global("session_matches", "IS_WINDOWS", False)
+        self.replace_global("session_matches", "pid_alive", lambda _pid: True)
+        cmdline = b"/usr/bin/python\0/usr/lib/ai-dikte/ai_dikte.py\0_live-session\0"
+        with mock.patch.object(Path, "read_bytes", return_value=cmdline):
+            self.assertTrue(self.runtime["session_matches"](1234))
+
     def test_selected_microphone_reaches_sounddevice_stream(self) -> None:
         captured: dict[str, object] = {}
 
@@ -237,6 +244,7 @@ class RuntimeContractTests(unittest.TestCase):
 
         self.runtime["set_windows_startup_enabled"](False)
         self.assertFalse(self.runtime["windows_startup_enabled"]())
+
     def test_tray_command_routes_to_platform_entrypoint(self) -> None:
         command = self.runtime["tray_child_command"]("setup")
         expected = "_tray-setup"
@@ -261,7 +269,8 @@ class TranscriptTests(unittest.IsolatedAsyncioTestCase):
 
     async def collect(self, timeout=3):
         return await self.runtime["collect_final_transcript"](
-            self.queue, self.receiver, self.complete, timeout=timeout)
+            self.queue, self.receiver, self.complete, timeout=timeout
+        )
 
     async def test_distinct_finals_keep_repeated_and_overlapping_words(self):
         for text in ("Evet.", "Evet.", "Bir", "Bir daha", "daha"):
