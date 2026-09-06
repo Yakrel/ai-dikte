@@ -19,6 +19,7 @@ class DialogTests(unittest.TestCase):
                         load_config=lambda: build_setup_config({}),
                         load_key=lambda: "test-key", save=save,
                         diagnostics=lambda: ("OK", True), lock=nullcontext,
+                        audio_cues=windows_controls,
                         devices=(lambda: [(None, "System default")]) if windows_controls else None,
                         get_startup=(lambda: False) if windows_controls else None,
                         set_startup=startup if windows_controls else None,
@@ -33,7 +34,11 @@ class DialogTests(unittest.TestCase):
                         try:
                             controls = list(descendants(root))
                             startup_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Start with Windows"]
+                            audio_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Play audio cues (start / stop / finish)"]
+                            visual_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Show visual status notifications (errors always appear)"]
                             self.assertEqual(bool(startup_widgets), windows_controls)
+                            self.assertEqual(bool(audio_widgets), windows_controls)
+                            self.assertEqual(len(visual_widgets), 1)
                             next(w for w in controls if w.winfo_class() == "TButton" and w.cget("text") == action).invoke()
                         except Exception as exc:
                             errors.append(exc)

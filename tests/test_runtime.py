@@ -137,6 +137,30 @@ class RuntimeContractTests(unittest.TestCase):
         validate.assert_not_called()
         save.assert_called_once_with("working-key", candidate)
 
+    def test_windows_audio_cue_uses_waveform_output(self) -> None:
+        play_sound = mock.Mock()
+        fake_winsound = SimpleNamespace(SND_MEMORY=4, PlaySound=play_sound)
+        self.replace_global("play_audio_cue", "IS_WINDOWS", True)
+        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": True})
+        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):
+            self.runtime["play_audio_cue"]("start")
+        payload, flags = play_sound.call_args.args
+        self.assertTrue(payload.startswith(b"RIFF"))
+        self.assertEqual(flags, fake_winsound.SND_MEMORY)
+
+    def test_audio_cue_failure_never_breaks_dictation(self) -> None:
+        fake_winsound = SimpleNamespace(
+            SND_MEMORY=4,
+            PlaySound=mock.Mock(side_effect=RuntimeError("no audio device")),
+        )
+        log = mock.Mock()
+        self.replace_global("play_audio_cue", "IS_WINDOWS", True)
+        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": True})
+        self.replace_global("play_audio_cue", "log_session_event", log)
+        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):
+            self.runtime["play_audio_cue"]("stop")
+        self.assertTrue(log.called)
+
     def test_api_preferences_validate_before_saving(self) -> None:
         existing = self.runtime["build_setup_config"]({})
         self.replace_global("save_settings", "load_config", lambda required=False: existing)

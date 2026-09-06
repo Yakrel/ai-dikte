@@ -16,6 +16,7 @@ class SettingsServices:
     save: Callable[[str, dict], None]
     diagnostics: Callable[[], tuple[str, bool]]
     lock: Callable[[], AbstractContextManager]
+    audio_cues: bool = False
     devices: Callable[[], list[tuple[int | None, str]]] | None = None
     get_startup: Callable[[], bool] | None = None
     set_startup: Callable[[bool], None] | None = None
@@ -95,10 +96,10 @@ def show_dialog(command: str, services: SettingsServices) -> bool:
             ttk.Label(frame, text="Microphone").grid(row=7, column=0, sticky="w")
             ttk.Combobox(frame, textvariable=device, values=device_labels, state="readonly").grid(
                 row=7, column=1, sticky="ew", pady=5)
-            if services.devices:
-                ttk.Checkbutton(frame, text="Play recording sounds", variable=cue).grid(
+            if services.audio_cues:
+                ttk.Checkbutton(frame, text="Play audio cues (start / stop / finish)", variable=cue).grid(
                     row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
-            ttk.Checkbutton(frame, text="Show notifications (errors always appear)", variable=notifications).grid(
+            ttk.Checkbutton(frame, text="Show visual status notifications (errors always appear)", variable=notifications).grid(
                 row=9, column=0, columnspan=2, sticky="w")
             if services.set_startup:
                 ttk.Checkbutton(frame, text="Start with Windows", variable=startup).grid(

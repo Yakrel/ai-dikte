@@ -156,14 +156,62 @@ class FileLock:
             self.file_handle.close()
 
 
+def _audio_cue_wave(cue: str) -> bytes:
+    """Build a tiny in-memory WAV so cues use the normal Windows audio output."""
+    import io
+    import math
+    import struct
+    import wave
+
+    patterns = {
+        "start": [(880, 90)],
+        "stop": [(660, 90)],
+        "finish": [(880, 70), (1174, 90)],
+        "error": [(440, 140)],
+    }
+    if cue not in patterns:
+        raise ValueError(f"Unknown audio cue: {cue}")
+
+    sample_rate = 22050
+    amplitude = int(32767 * 0.22)
+    fade_samples = max(1, int(sample_rate * 0.005))
+    gap_samples = int(sample_rate * 0.015)
+    frames = bytearray()
+
+    for note_index, (frequency, duration_ms) in enumerate(patterns[cue]):
+        sample_count = max(1, int(sample_rate * duration_ms / 1000))
+        for index in range(sample_count):
+            fade_in = min(1.0, index / fade_samples)
+            fade_out = min(1.0, (sample_count - 1 - index) / fade_samples)
+            envelope = min(fade_in, fade_out)
+            sample = int(
+                amplitude
+                * envelope
+                * math.sin(2.0 * math.pi * frequency * index / sample_rate)
+            )
+            frames.extend(struct.pack("<h", sample))
+        if note_index + 1 < len(patterns[cue]):
+            frames.extend(b"\x00\x00" * gap_samples)
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(frames)
+    return output.getvalue()
+
+
 def play_audio_cue(cue: str) -> None:
-    if not IS_WINDOWS or not config_audio_cue(load_config()):
+    if not IS_WINDOWS or not config_audio_cue(load_config(required=False)):
         return
-    import winsound
-    tones = {"start": [(880, 50)], "stop": [(587, 50)],
-             "finish": [(880, 40), (1174, 50)], "error": [(440, 100)]}
-    for frequency, duration in tones[cue]:
-        winsound.Beep(frequency, duration)
+
+    try:
+        import winsound
+        winsound.PlaySound(_audio_cue_wave(cue), winsound.SND_MEMORY)
+    except Exception as exc:
+        # Audio feedback is ancillary: never break dictation because playback failed.
+        log_session_event(f"Audio cue failed ({cue}): {type(exc).__name__}: {exc}")
 
 
 def get_windows_osd():
@@ -1412,6 +1460,7 @@ def run_tray_gui_command(subcmd: str) -> bool:
         save=save_settings,
         diagnostics=doctor_report,
         lock=lambda: FileLock(LOCK_FILE),
+        audio_cues=IS_WINDOWS,
         devices=list_input_devices if IS_WINDOWS else None,
         get_startup=windows_startup_enabled if IS_WINDOWS else None,
         set_startup=set_windows_startup_enabled if IS_WINDOWS else None,
