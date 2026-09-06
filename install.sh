@@ -26,7 +26,13 @@ if ! command -v pacman >/dev/null 2>&1; then
     exit 1
 fi
 
-# Detect the active Wayland desktop so only its required typing backend is installed.
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    echo -e "${RED}[ERROR]${NC} AI Dikte supports KDE Plasma Wayland and Omarchy/Hyprland only."
+    echo "X11, GNOME, and other desktop/compositor paths are intentionally unsupported."
+    exit 1
+fi
+
+# Detect the active supported Wayland desktop so only its required typing backend is installed.
 desktop_env="$(printf '%s %s %s' \
     "${XDG_CURRENT_DESKTOP:-}" \
     "${XDG_SESSION_DESKTOP:-}" \
@@ -40,7 +46,7 @@ elif [ -n "${KDE_FULL_SESSION:-}" ] || [[ "$desktop_env" == *kde* ]] || [[ "$des
     TYPING_BACKEND="kwtype"
 else
     echo -e "${RED}[ERROR]${NC} Unsupported desktop session."
-    echo "AI Dikte currently supports Hyprland/Omarchy and KDE Plasma on Wayland."
+    echo "AI Dikte supports KDE Plasma Wayland and Omarchy/Hyprland. GNOME is intentionally unsupported."
     echo "Detected desktop environment: ${desktop_env:-unknown}"
     exit 1
 fi
@@ -94,21 +100,26 @@ fi
 echo -e "${BOLD}${BLUE}==>${NC} Building and installing AI Dikte..."
 makepkg --syncdeps --install --clean --noconfirm --needed
 
+if [ "$DESKTOP_KIND" = "hyprland" ]; then
+    echo -e "${BOLD}${BLUE}==>${NC} Installing and validating Meta+Z Hyprland shortcut..."
+    ai-dikte shortcut-install
+fi
+
 echo -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"
 echo ""
 
-# Run interactive setup
+# Run initial setup when an interactive terminal is available.
 if [ -t 0 ]; then
     echo -e "${BOLD}${BLUE}==>${NC} Running initial configuration..."
     ai-dikte setup
     echo ""
     echo -e "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-    ai-dikte doctor || true
+    ai-dikte doctor
+    echo ""
+    echo -e "${GREEN}${BOLD}Setup complete!${NC} Press ${BOLD}Meta+Z${NC} to start dictation."
 else
-    echo -e "${BOLD}To configure your Gemini API key, run:${NC}"
+    echo -e "${BOLD}Initial configuration was not run because no interactive terminal is available.${NC}"
+    echo "Installation is complete, but setup is still required:"
     echo "  ai-dikte setup"
     echo "  ai-dikte doctor"
 fi
-
-echo ""
-echo -e "${GREEN}${BOLD}Setup complete!${NC} Press ${BOLD}Meta+Z${NC} to start dictation."

@@ -2,9 +2,10 @@
 Type=Application
 Name=AI Dikte
 Comment=Toggle AI voice dictation
-Exec=/usr/bin/ai-dikte-toggle
-TryExec=/usr/bin/ai-dikte-toggle
+Exec=ai-dikte-toggle
+TryExec=ai-dikte-toggle
 Terminal=false
+Icon=ai-dikte
 StartupNotify=false
 NoDisplay=true
 X-KDE-Shortcuts=Meta+Z

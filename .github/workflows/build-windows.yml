@@ -50,6 +50,10 @@ jobs:
             exit 1
           }
 
+      - name: Test installer failure paths
+        shell: pwsh
+        run: ./tests/test_installer.ps1
+
       - name: Source runtime self-test
         run: python ai_dikte.py --self-test
 
@@ -61,7 +65,6 @@ jobs:
             --windowed `
             --name "ai-dikte-windows" `
             --icon "ai-dikte.ico" `
-            --add-data "ai-dikte;." `
             --add-data "ai-dikte.png;." `
             --collect-submodules websockets `
             --collect-data _sounddevice_data `
