@@ -175,7 +175,6 @@ class RuntimeContractTests(unittest.TestCase):
     def test_typing_failure_does_not_try_another_backend(self):
         self.replace_global("output_text", "IS_WINDOWS", False)
         self.replace_global("output_text", "desktop_kind", lambda: "hyprland")
-        self.replace_global("output_text", "load_config", lambda required=False: {})
         with mock.patch("shutil.which", return_value="/usr/bin/wtype"), \
              mock.patch("subprocess.run", return_value=SimpleNamespace(returncode=1, stderr="failed")) as run:
             with self.assertRaisesRegex(RuntimeError, "wtype failed"):
@@ -183,9 +182,8 @@ class RuntimeContractTests(unittest.TestCase):
             run.assert_called_once()
 
     def test_missing_desktop_backend_does_not_select_installed_alternative(self):
-        self.replace_global("output_candidates", "IS_WINDOWS", False)
-        self.replace_global("output_candidates", "desktop_kind", lambda: "hyprland")
-        self.replace_global("output_candidates", "load_config", lambda required=False: {})
+        self.replace_global("selected_output_driver", "IS_WINDOWS", False)
+        self.replace_global("selected_output_driver", "desktop_kind", lambda: "hyprland")
         with mock.patch("shutil.which", side_effect=lambda name: "/usr/bin/kwtype" if name == "kwtype" else None):
             self.assertIsNone(self.runtime["available_output_driver"]())
 

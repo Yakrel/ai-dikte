@@ -11,7 +11,6 @@ IS_WINDOWS = sys.platform == "win32"
 APP = "ai-dikte"
 DEFAULT_LANGUAGE = "tr-TR"
 DEFAULT_MODE = "SMART"
-DEFAULT_HOTKEY = "win+z" if IS_WINDOWS else "SUPER + Z"
 CONFIG_DIR = Path(os.environ.get("APPDATA" if IS_WINDOWS else "XDG_CONFIG_HOME", Path.home() / ".config")) / APP
 CONFIG_FILE = CONFIG_DIR / "config.json"
 if IS_WINDOWS:
@@ -94,16 +93,6 @@ def config_vocabulary(config: dict[str, Any]) -> list[str]:
     if len(result) > 1000:
         raise RuntimeError("Config 'custom_vocabulary' supports at most 1000 terms.")
     return result
-
-
-def config_output_driver(_config: dict[str, Any]) -> str:
-    """Compatibility shim: output backend is selected by the runtime, never config."""
-    return "auto"
-
-
-def config_hotkey(_config: dict[str, Any]) -> str:
-    """Compatibility shim: supported platforms use one fixed shortcut."""
-    return DEFAULT_HOTKEY
 
 
 def config_audio_cue(config: dict[str, Any]) -> bool:

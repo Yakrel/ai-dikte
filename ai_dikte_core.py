@@ -18,12 +18,13 @@ import sys
 import tempfile
 import threading
 import time
-import traceback
 from pathlib import Path
 from typing import Any
 from ai_dikte_config import (
-    APP, CONFIG_DIR, CONFIG_FILE,
-    load_config, write_config, load_api_key, config_language, config_mode, config_vocabulary, config_output_driver, config_hotkey, config_audio_cue, config_notify_mode, config_input_device, build_setup_config, save_setup_config,
+    APP, CONFIG_FILE,
+    load_config, load_api_key, config_language, config_mode, config_vocabulary,
+    config_audio_cue, config_notify_mode, config_input_device,
+    build_setup_config, save_setup_config,
 )
 from urllib.parse import quote
 
@@ -91,8 +92,8 @@ HYPR_MARKER_START_LUA = "-- >>> ai-dikte >>>"
 HYPR_MARKER_END_LUA = "-- <<< ai-dikte <<<"
 HYPR_MARKER_START_CONF = "# >>> ai-dikte >>>"
 HYPR_MARKER_END_CONF = "# <<< ai-dikte <<<"
-HYPR_BINDING_LUA = 'o.bind("SUPER + Z", "AI Dikte", "/usr/bin/ai-dikte-toggle")'
-HYPR_BINDING_CONF = "bind = SUPER, Z, exec, /usr/bin/ai-dikte-toggle"
+HYPR_BINDING_LUA = 'o.bind("SUPER + Z", "AI Dikte", "ai-dikte-toggle")'
+HYPR_BINDING_CONF = "bind = SUPER, Z, exec, ai-dikte-toggle"
 
 _GLOBAL_TRAY_ICON: Any = None
 _GLOBAL_OSD: Any = None  # WindowsOSD, initialized lazily
@@ -200,10 +201,23 @@ def notify(
                 osd.show(message, "#89b4fa", auto_hide_ms=2000)
             return
 
-    if not shutil.which("notify-send"):
-        raise RuntimeError("Required notification tool is missing: notify-send")
-    subprocess.run(["notify-send", "-a", "AI Dikte", "-u", urgency, title, message],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
+    notifier = shutil.which("notify-send")
+    if not notifier:
+        log_session_event("Notification skipped: notify-send is unavailable.")
+        return
+    try:
+        result = subprocess.run(
+            [notifier, "-a", "AI Dikte", "-u", urgency, title, message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            detail = result.stderr.strip() or str(result.returncode)
+            log_session_event(f"Notification failed: {detail}")
+    except OSError as exc:
+        log_session_event(f"Notification failed: {exc}")
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -263,8 +277,6 @@ def save_settings(key: str, candidate: dict[str, Any]) -> None:
     ):
         validate_api_key(key, candidate)
     save_setup_config(key, candidate)
-    if not IS_WINDOWS and desktop_kind() == "hyprland":
-        install_hyprland_shortcut()
 
 
 def setup() -> None:
@@ -293,36 +305,29 @@ def desktop_kind() -> str:
     return "other"
 
 
-def output_candidates(config: dict[str, Any] | None = None) -> list[str]:
+def selected_output_driver() -> str:
     if IS_WINDOWS:
-        return ["sendinput"]
-
-    config = config or load_config(required=False)
-    forced = config_output_driver(config)
-    if forced != "auto":
-        return [forced]
+        return "sendinput"
 
     desktop = desktop_kind()
     if desktop == "hyprland":
-        return ["wtype"]
+        return "wtype"
     if desktop == "kde":
-        return ["kwtype"]
+        return "kwtype"
     raise RuntimeError("Unsupported desktop: use KDE Plasma or Hyprland on Wayland.")
 
 
-def available_output_driver(config: dict[str, Any] | None = None) -> str | None:
+def available_output_driver(_config: dict[str, Any] | None = None) -> str | None:
     if IS_WINDOWS:
         return "sendinput"
-    for driver in output_candidates(config):
-        if shutil.which(driver):
-            return driver
-    return None
+    driver = selected_output_driver()
+    return driver if shutil.which(driver) else None
 
 
 def output_text(text: str) -> str:
     if IS_WINDOWS:
         return output_text_windows(text)
-    driver = output_candidates()[0]
+    driver = selected_output_driver()
     executable = shutil.which(driver)
     if not executable:
         raise RuntimeError(f"Required typing backend is missing: {driver}")
@@ -377,13 +382,26 @@ def remove_managed_shortcut_block(path: Path) -> bool:
 
 
 def reload_hyprland() -> None:
-    if shutil.which("hyprctl"):
-        subprocess.run(
-            ["hyprctl", "reload"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl:
+        raise RuntimeError("Required Hyprland control tool is missing: hyprctl")
+
+    reload_result = subprocess.run(
+        [hyprctl, "reload"], capture_output=True, text=True, check=False
+    )
+    if reload_result.returncode:
+        detail = reload_result.stderr.strip() or reload_result.stdout.strip() or str(reload_result.returncode)
+        raise RuntimeError(f"Hyprland reload failed: {detail}")
+
+    errors_result = subprocess.run(
+        [hyprctl, "configerrors"], capture_output=True, text=True, check=False
+    )
+    if errors_result.returncode:
+        detail = errors_result.stderr.strip() or errors_result.stdout.strip() or str(errors_result.returncode)
+        raise RuntimeError(f"Could not validate Hyprland configuration: {detail}")
+    errors = errors_result.stdout.strip()
+    if errors and "no errors" not in errors.lower():
+        raise RuntimeError(f"Hyprland configuration has errors: {errors}")
 
 
 def install_hyprland_shortcut() -> None:
@@ -392,27 +410,38 @@ def install_hyprland_shortcut() -> None:
         return
 
     target, binding, start_marker, end_marker = hyprland_shortcut_target()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    candidates = (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF)
+    originals = {
+        path: path.read_text(encoding="utf-8") if path.exists() else None
+        for path in candidates
+    }
 
-    for candidate in (HYPR_BINDINGS_LUA, HYPR_BINDINGS_CONF, HYPR_HYPRLAND_CONF):
-        if candidate != target:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        for candidate in candidates:
             remove_managed_shortcut_block(candidate)
 
-    current = target.read_text(encoding="utf-8") if target.exists() else ""
-    if (
-        start_marker not in current
-        and HYPR_MARKER_START_LUA not in current
-        and HYPR_MARKER_START_CONF not in current
-    ):
+        current = target.read_text(encoding="utf-8") if target.exists() else ""
         block = f"{start_marker}\n{binding}\n{end_marker}\n"
         separator = "" if not current or current.endswith("\n") else "\n"
         with target.open("a", encoding="utf-8") as handle:
             handle.write(separator + block)
-        print(f"[OK] Installed Hyprland shortcut Meta+Z in {target}")
-    else:
-        print(f"[OK] Hyprland shortcut already installed in {target}")
 
-    reload_hyprland()
+        reload_hyprland()
+    except Exception:
+        for path, original in originals.items():
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(original, encoding="utf-8")
+        try:
+            reload_hyprland()
+        except Exception:
+            pass
+        raise
+
+    print(f"[OK] Installed Hyprland shortcut Meta+Z in {target}")
 
 
 def remove_hyprland_shortcut() -> None:
@@ -563,6 +592,8 @@ _WINDOWS_SESSION_CONTROLLER: WindowsSessionController | None = (
 
 def start_live_session() -> None:
     load_api_key()
+    if not IS_WINDOWS and not os.environ.get("WAYLAND_DISPLAY"):
+        fail("Linux dictation requires a Wayland session.")
     if websockets is None:
         fail("Python websockets module is missing. Install python-websockets / pip install websockets.")
 
@@ -1295,6 +1326,9 @@ def doctor_report() -> tuple[str, bool]:
             doctor()
         except SystemExit as exc:
             failed = bool(exc.code)
+        except Exception as exc:
+            failed = True
+            print(f"[FAIL] diagnostics: {exc}")
     return output.getvalue().strip() or "No diagnostic output was produced.", not failed
 
 
@@ -1393,8 +1427,8 @@ def run_daemon() -> None:
 
     if not IS_WINDOWS:
         raise RuntimeError("Linux uses the desktop Meta+Z shortcut; daemon mode is Windows-only.")
-    config = load_config()
-    hotkey = config_hotkey(config)
+    load_config()
+    hotkey = "win+z"
 
     print("[*] Starting AI Dikte daemon...")
     print(f"[*] Dictation hotkey: {hotkey}")
@@ -1620,8 +1654,13 @@ def run_daemon() -> None:
 
 def doctor() -> None:
     config = load_config(required=False)
-    driver = available_output_driver(config)
     desktop = desktop_kind()
+    driver_error = None
+    try:
+        driver = available_output_driver(config)
+    except RuntimeError as exc:
+        driver = None
+        driver_error = str(exc)
 
     if IS_WINDOWS:
         checks = {
@@ -1635,6 +1674,7 @@ def doctor() -> None:
         }
     else:
         checks = {
+            "supported-desktop": desktop in {"kde", "hyprland"},
             "wayland": bool(os.environ.get("WAYLAND_DISPLAY")),
             "pw-record": bool(shutil.which("pw-record")),
             "notify-send": bool(shutil.which("notify-send")),
@@ -1655,6 +1695,8 @@ def doctor() -> None:
         print(f"{status_mark} {name}{suffix}")
 
     print(f"i desktop/os: {desktop}")
+    if driver_error:
+        print(f"i direct-typing: {driver_error}")
     print(f"i model: {MODEL}")
     if IS_WINDOWS:
         print("i hotkey: win+z")

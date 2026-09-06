@@ -2,7 +2,7 @@ pkgname=ai-dikte
 pkgver=0.4.0
 pkgrel=5
 pkgdesc='Minimal Wayland dictation using Gemini 3.5 Transcribe Live'
-arch=('x86_64')
+arch=('any')
 url='https://github.com/Yakrel/ai-dikte'
 license=('MIT')
 depends=(
@@ -24,19 +24,21 @@ source=(
   'ai_dikte_config.py'
   'ai_dikte_ui.py'
   'ai-dikte-settings.desktop'
+  'ai-dikte.png'
   'ai-dikte-toggle'
   'ai-dikte.desktop'
   'LICENSE'
 )
 sha256sums=(
   '9b5216a1ffc1ac525fa422140c6a291ecb80f59fd80f6a16722bd6172e615b48'
-  '3799cf6086600cbc25237ebc22fb5c53618a560b0383ddce8e2fe56d345da655'
-  '28d735d7ad59e2b6e021f5712258d17da443556b257158005afc990776a48b75'
-  'ff49a8edba6850e5d63f67d5dcca1675843bb9b2f85611ea0d6cc8c0deb54f71'
+  '461cdf3e54e975a8b4f7e3abe1a819672f82c682c1189280c9bb7bb7f8a66581'
+  'aefc5babe27ca55e93bcb9d1c990bd231ea2792f198992d0ba7ff8d126504a09'
+  '4f3a226577f24433afd1144e198c77a7b6c7d04454235c41907d4f37d5e5a4ee'
   '4cc51fb14cb3b73bec99067f077fd225da3d1413b871012442151ead0e05bd68'
-  '80f7b318a064fdca2ccf3e857bd1d6dd13ac44e9b3947efee3e8b6e80c93c2ba'
+  'a22f3502c74de8a00cf2193ae90c7e695ec2b5d4e16cde6a24c1ce4746af5ef9'
+  '09df0758103426f42ce70aaf495f8740472a09ea73eb84ebfadeae0f2a7017ca'
   'e5fd2f221e661594b9b7c6ab9c1b0c0840b611fe9787cede188911a46f870a55'
-  '62cabc68f86da81333fa68f42c89e01dc12a89a5fc1f416b8c18ac0ea9f6f480'
+  '4af2eea874ada16c8c13e7fb67e7c28c49ec76e8bac7e2997f78f94cc1041134'
   'f8719185a1f3d2a8ec0bf8507b1476e1a0f37cd10328402661f0cd2748d855d3'
 )
 
@@ -46,6 +48,8 @@ package() {
     install -Dm644 "$module" "$pkgdir/usr/lib/ai-dikte/$module"
   done
   install -Dm644 ai-dikte-settings.desktop "$pkgdir/usr/share/applications/ai-dikte-settings.desktop"
+  install -Dm644 ai-dikte.png "$pkgdir/usr/lib/ai-dikte/ai-dikte.png"
+  install -Dm644 ai-dikte.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/ai-dikte.png"
   install -Dm755 ai-dikte-toggle "$pkgdir/usr/bin/ai-dikte-toggle"
   ln -sf ai-dikte "$pkgdir/usr/bin/gemini-dikte"
   ln -sf ai-dikte-toggle "$pkgdir/usr/bin/gemini-dikte-toggle"

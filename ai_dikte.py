@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Single application entrypoint for the source install and frozen executable."""
 from __future__ import annotations
-import os
 import sys
-from pathlib import Path
+import shutil
+import subprocess
 
 VERSION = "0.4.0"
 _DAEMON_MUTEX_HANDLE = None
@@ -112,18 +112,33 @@ def main() -> None:
     core.main()
 
 
+def show_fatal_error(message: str) -> None:
+    print(message, file=sys.stderr)
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, message, "AI Dikte — Error", 0x10)
+        return
+    if sys.platform.startswith("linux"):
+        notifier = shutil.which("notify-send")
+        if notifier:
+            try:
+                subprocess.run(
+                    [notifier, "-a", "AI Dikte", "-u", "critical", "AI Dikte — Error", message],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            except OSError:
+                pass
+
+
 def entrypoint() -> None:
     try:
         main()
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:
-        # A windowed EXE has no console: fatal errors must still be visible.
-        message = f"AI Dikte failed: {exc}"
-        print(message, file=sys.stderr)
-        if sys.platform == "win32":
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(None, message, "AI Dikte — Error", 0x10)
+        show_fatal_error(f"AI Dikte failed: {exc}")
         raise SystemExit(1)
 
 

@@ -5,4 +5,5 @@ Comment=Configure AI dictation
 Exec=ai-dikte setup
 TryExec=ai-dikte
 Terminal=false
+Icon=ai-dikte
 Categories=Utility;

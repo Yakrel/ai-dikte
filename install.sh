@@ -100,6 +100,11 @@ fi
 echo -e "${BOLD}${BLUE}==>${NC} Building and installing AI Dikte..."
 makepkg --syncdeps --install --clean --noconfirm --needed
 
+if [ "$DESKTOP_KIND" = "hyprland" ]; then
+    echo -e "${BOLD}${BLUE}==>${NC} Installing and validating Meta+Z Hyprland shortcut..."
+    ai-dikte shortcut-install
+fi
+
 echo -e "${GREEN}==>${NC} ${BOLD}AI Dikte installed successfully!${NC}"
 echo ""
 

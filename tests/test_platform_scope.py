@@ -20,30 +20,21 @@ class PlatformScopeTests(unittest.TestCase):
         self.assertNotIn("output_driver", config)
         self.assertNotIn("hotkey", config)
 
-    def test_stale_backend_config_cannot_override_runtime_selection(self) -> None:
-        self.assertEqual(
-            ai_dikte_config.config_output_driver({"output_driver": "kwtype"}),
-            "auto",
-        )
-
     def test_kde_wayland_selects_kwtype(self) -> None:
         with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \
-             mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \
              mock.patch.object(ai_dikte_core, "desktop_kind", return_value="kde"):
-            self.assertEqual(ai_dikte_core.output_candidates({}), ["kwtype"])
+            self.assertEqual(ai_dikte_core.selected_output_driver(), "kwtype")
 
     def test_hyprland_selects_wtype(self) -> None:
         with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \
-             mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \
              mock.patch.object(ai_dikte_core, "desktop_kind", return_value="hyprland"):
-            self.assertEqual(ai_dikte_core.output_candidates({}), ["wtype"])
+            self.assertEqual(ai_dikte_core.selected_output_driver(), "wtype")
 
     def test_gnome_is_explicitly_unsupported(self) -> None:
         with mock.patch.object(ai_dikte_core, "IS_WINDOWS", False), \
-             mock.patch.object(ai_dikte_core, "config_output_driver", return_value="auto"), \
              mock.patch.object(ai_dikte_core, "desktop_kind", return_value="other"):
             with self.assertRaisesRegex(RuntimeError, "Unsupported desktop"):
-                ai_dikte_core.output_candidates({})
+                ai_dikte_core.selected_output_driver()
 
     def test_linux_launchers_do_not_require_usr_bin(self) -> None:
         root = Path(__file__).resolve().parents[1]

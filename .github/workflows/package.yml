@@ -40,6 +40,8 @@ jobs:
           cd /tmp
           python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --version
           python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --self-test
+          test -f /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai-dikte.png
+          test -f /tmp/ai-dikte-installed/usr/share/icons/hicolor/256x256/apps/ai-dikte.png
           cd "$GITHUB_WORKSPACE"
           if bsdtar -tf "$base_pkg" | grep -q '^usr/bin/kwtype$'; then
             echo "Base package must not bundle KWtype"
