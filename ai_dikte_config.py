@@ -98,7 +98,7 @@ def config_vocabulary(config: dict[str, Any]) -> list[str]:
 
 def config_output_driver(_config: dict[str, Any]) -> str:
     """Compatibility shim: output backend is selected by the runtime, never config."""
-    return "sendinput" if IS_WINDOWS else "auto"
+    return "auto"
 
 
 def config_hotkey(_config: dict[str, Any]) -> str:
