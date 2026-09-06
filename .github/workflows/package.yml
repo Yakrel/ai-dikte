@@ -19,7 +19,7 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          libnotify pipewire-audio python python-websockets tk xorg-server-xvfb xorg-xauth xorg-xwayland wtype
+          libnotify pipewire-audio python python-websockets tk xorg-fonts-misc xorg-server-xvfb xorg-xauth xorg-xwayland wtype
           kwayland libxkbcommon qt6-base wayland meson ninja pkgconf
 
       - name: Check script syntax
