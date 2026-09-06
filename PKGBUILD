@@ -1,6 +1,6 @@
 pkgname=ai-dikte
 pkgver=0.4.0
-pkgrel=4
+pkgrel=5
 pkgdesc='Minimal Wayland dictation using Gemini 3.5 Transcribe Live'
 arch=('x86_64')
 url='https://github.com/Yakrel/ai-dikte'
@@ -32,7 +32,7 @@ sha256sums=(
   '9b5216a1ffc1ac525fa422140c6a291ecb80f59fd80f6a16722bd6172e615b48'
   '3799cf6086600cbc25237ebc22fb5c53618a560b0383ddce8e2fe56d345da655'
   '28d735d7ad59e2b6e021f5712258d17da443556b257158005afc990776a48b75'
-  'bbd34e5ce58754dc86cb25108d031bd60e29ea4c18d73e6e884c5b4ebd51bde3'
+  'ff49a8edba6850e5d63f67d5dcca1675843bb9b2f85611ea0d6cc8c0deb54f71'
   '4cc51fb14cb3b73bec99067f077fd225da3d1413b871012442151ead0e05bd68'
   '80f7b318a064fdca2ccf3e857bd1d6dd13ac44e9b3947efee3e8b6e80c93c2ba'
   'e5fd2f221e661594b9b7c6ab9c1b0c0840b611fe9787cede188911a46f870a55'
