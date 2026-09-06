@@ -1,0 +1,105 @@
+name: Apply audio feedback fix
+
+on:
+  push:
+    branches:
+      - fix/audio-cues-and-visual-notifications
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/audio-cues-and-visual-notifications
+          fetch-depth: 0
+
+      - name: Apply feedback fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+
+          core_path = Path('ai_dikte_core.py')
+          core = core_path.read_text(encoding='utf-8')
+          old_audio = '''def play_audio_cue(cue: str) -> None:\n    if not IS_WINDOWS or not config_audio_cue(load_config()):\n        return\n    import winsound\n    tones = {"start": [(880, 50)], "stop": [(587, 50)],\n             "finish": [(880, 40), (1174, 50)], "error": [(440, 100)]}\n    for frequency, duration in tones[cue]:\n        winsound.Beep(frequency, duration)\n'''
+          new_audio = '''def _audio_cue_wave(cue: str) -> bytes:\n    \"\"\"Build a tiny in-memory WAV so cues use the normal Windows audio output.\"\"\"\n    import io\n    import math\n    import struct\n    import wave\n\n    patterns = {\n        "start": [(880, 90)],\n        "stop": [(660, 90)],\n        "finish": [(880, 70), (1174, 90)],\n        "error": [(440, 140)],\n    }\n    if cue not in patterns:\n        raise ValueError(f"Unknown audio cue: {cue}")\n\n    sample_rate = 22050\n    amplitude = int(32767 * 0.22)\n    fade_samples = max(1, int(sample_rate * 0.005))\n    gap_samples = int(sample_rate * 0.015)\n    frames = bytearray()\n\n    for note_index, (frequency, duration_ms) in enumerate(patterns[cue]):\n        sample_count = max(1, int(sample_rate * duration_ms / 1000))\n        for index in range(sample_count):\n            fade_in = min(1.0, index / fade_samples)\n            fade_out = min(1.0, (sample_count - 1 - index) / fade_samples)\n            envelope = min(fade_in, fade_out)\n            sample = int(\n                amplitude\n                * envelope\n                * math.sin(2.0 * math.pi * frequency * index / sample_rate)\n            )\n            frames.extend(struct.pack("<h", sample))\n        if note_index + 1 < len(patterns[cue]):\n            frames.extend(b"\\x00\\x00" * gap_samples)\n\n    output = io.BytesIO()\n    with wave.open(output, "wb") as wav:\n        wav.setnchannels(1)\n        wav.setsampwidth(2)\n        wav.setframerate(sample_rate)\n        wav.writeframes(frames)\n    return output.getvalue()\n\n\ndef play_audio_cue(cue: str) -> None:\n    if not IS_WINDOWS or not config_audio_cue(load_config(required=False)):\n        return\n\n    try:\n        import winsound\n        winsound.PlaySound(_audio_cue_wave(cue), winsound.SND_MEMORY)\n    except Exception as exc:\n        # Audio feedback is ancillary: never break dictation because playback failed.\n        log_session_event(f"Audio cue failed ({cue}): {type(exc).__name__}: {exc}")\n'''
+          if old_audio not in core:
+              raise SystemExit('play_audio_cue block not found')
+          core = core.replace(old_audio, new_audio, 1)
+          old_services = '''        devices=list_input_devices if IS_WINDOWS else None,\n        get_startup=windows_startup_enabled if IS_WINDOWS else None,\n'''
+          new_services = '''        audio_cues=IS_WINDOWS,\n        devices=list_input_devices if IS_WINDOWS else None,\n        get_startup=windows_startup_enabled if IS_WINDOWS else None,\n'''
+          if old_services not in core:
+              raise SystemExit('SettingsServices construction anchor not found')
+          core = core.replace(old_services, new_services, 1)
+          core_path.write_text(core, encoding='utf-8')
+
+          ui_path = Path('ai_dikte_ui.py')
+          ui = ui_path.read_text(encoding='utf-8')
+          old_dataclass = '''    lock: Callable[[], AbstractContextManager]\n    devices: Callable[[], list[tuple[int | None, str]]] | None = None\n'''
+          new_dataclass = '''    lock: Callable[[], AbstractContextManager]\n    audio_cues: bool = False\n    devices: Callable[[], list[tuple[int | None, str]]] | None = None\n'''
+          if old_dataclass not in ui:
+              raise SystemExit('SettingsServices dataclass anchor not found')
+          ui = ui.replace(old_dataclass, new_dataclass, 1)
+          ui = ui.replace(
+              '''            if services.devices:\n                ttk.Checkbutton(frame, text="Play recording sounds", variable=cue).grid(\n''',
+              '''            if services.audio_cues:\n                ttk.Checkbutton(frame, text="Play audio cues (start / stop / finish)", variable=cue).grid(\n''',
+              1,
+          )
+          ui = ui.replace(
+              'ttk.Checkbutton(frame, text="Show notifications (errors always appear)", variable=notifications).grid(',
+              'ttk.Checkbutton(frame, text="Show visual status notifications (errors always appear)", variable=notifications).grid(',
+              1,
+          )
+          ui_path.write_text(ui, encoding='utf-8')
+
+          runtime_path = Path('tests/test_runtime.py')
+          runtime = runtime_path.read_text(encoding='utf-8')
+          anchor = '''    def test_api_preferences_validate_before_saving(self) -> None:\n'''
+          tests = '''    def test_windows_audio_cue_uses_waveform_output(self) -> None:\n        play_sound = mock.Mock()\n        fake_winsound = SimpleNamespace(SND_MEMORY=4, PlaySound=play_sound)\n        self.replace_global("play_audio_cue", "IS_WINDOWS", True)\n        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": True})\n        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):\n            self.runtime["play_audio_cue"]("start")\n        payload, flags = play_sound.call_args.args\n        self.assertTrue(payload.startswith(b"RIFF"))\n        self.assertEqual(flags, fake_winsound.SND_MEMORY)\n\n    def test_audio_cue_failure_never_breaks_dictation(self) -> None:\n        fake_winsound = SimpleNamespace(\n            SND_MEMORY=4,\n            PlaySound=mock.Mock(side_effect=RuntimeError("no audio device")),\n        )\n        log = mock.Mock()\n        self.replace_global("play_audio_cue", "IS_WINDOWS", True)\n        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": True})\n        self.replace_global("play_audio_cue", "log_session_event", log)\n        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):\n            self.runtime["play_audio_cue"]("stop")\n        self.assertTrue(log.called)\n\n'''
+          if anchor not in runtime:
+              raise SystemExit('runtime test anchor not found')
+          runtime_path.write_text(runtime.replace(anchor, tests + anchor, 1), encoding='utf-8')
+
+          ui_test_path = Path('tests/test_ui.py')
+          ui_test = ui_test_path.read_text(encoding='utf-8')
+          old_services_test = '''                        diagnostics=lambda: ("OK", True), lock=nullcontext,\n                        devices=(lambda: [(None, "System default")]) if windows_controls else None,\n'''
+          new_services_test = '''                        diagnostics=lambda: ("OK", True), lock=nullcontext,\n                        audio_cues=windows_controls,\n                        devices=(lambda: [(None, "System default")]) if windows_controls else None,\n'''
+          if old_services_test not in ui_test:
+              raise SystemExit('UI test service anchor not found')
+          ui_test = ui_test.replace(old_services_test, new_services_test, 1)
+          old_assert = '''                            startup_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Start with Windows"]\n                            self.assertEqual(bool(startup_widgets), windows_controls)\n'''
+          new_assert = '''                            startup_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Start with Windows"]\n                            audio_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Play audio cues (start / stop / finish)"]\n                            visual_widgets = [w for w in controls if "text" in w.keys() and w.cget("text") == "Show visual status notifications (errors always appear)"]\n                            self.assertEqual(bool(startup_widgets), windows_controls)\n                            self.assertEqual(bool(audio_widgets), windows_controls)\n                            self.assertEqual(len(visual_widgets), 1)\n'''
+          if old_assert not in ui_test:
+              raise SystemExit('UI test assertion anchor not found')
+          ui_test_path.write_text(ui_test.replace(old_assert, new_assert, 1), encoding='utf-8')
+
+          pkg_path = Path('PKGBUILD')
+          pkg = pkg_path.read_text(encoding='utf-8')
+          source_match = re.search(r"source=\(\n(.*?)\n\)", pkg, re.S)
+          sums_match = re.search(r"sha256sums=\(\n.*?\n\)", pkg, re.S)
+          if not source_match or not sums_match:
+              raise SystemExit('Could not parse PKGBUILD')
+          names = re.findall(r"'([^']+)'", source_match.group(1))
+          sums = [hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in names]
+          new_sums = "sha256sums=(\n" + "\n".join(f"  '{digest}'" for digest in sums) + "\n)"
+          pkg_path.write_text(pkg[:sums_match.start()] + new_sums + pkg[sums_match.end():], encoding='utf-8')
+          PY
+
+      - name: Verify syntax
+        run: python3 -m py_compile ai_dikte_core.py ai_dikte_ui.py tests/test_runtime.py tests/test_ui.py
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "Berkay YETGİN"
+          git config user.email "85676216+Yakrel@users.noreply.github.com"
+          git add ai_dikte_core.py ai_dikte_ui.py tests/test_runtime.py tests/test_ui.py PKGBUILD
+          git commit -m "fix: make audio cues reliable and clarify visual feedback"
+          git push origin HEAD:fix/audio-cues-and-visual-notifications
