@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -22,10 +21,9 @@ class PlatformScopeTests(unittest.TestCase):
         self.assertNotIn("hotkey", config)
 
     def test_stale_backend_config_cannot_override_runtime_selection(self) -> None:
-        expected = "sendinput" if ai_dikte_config.IS_WINDOWS else "auto"
         self.assertEqual(
             ai_dikte_config.config_output_driver({"output_driver": "kwtype"}),
-            expected,
+            "auto",
         )
 
     def test_kde_wayland_selects_kwtype(self) -> None:
