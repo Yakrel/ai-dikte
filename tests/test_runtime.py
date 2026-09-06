@@ -27,7 +27,7 @@ class RuntimeContractTests(unittest.TestCase):
         )
         cls.environment.start()
         import ai_dikte_config, ai_dikte_core
-        importlib.reload(ai_dikte_config)
+        cls.config = importlib.reload(ai_dikte_config)
         cls.runtime = vars(importlib.reload(ai_dikte_core))
 
     @classmethod
@@ -64,10 +64,10 @@ class RuntimeContractTests(unittest.TestCase):
     def test_config_write_atomically_replaces_file_without_temp_residue(self) -> None:
         directory = Path(tempfile.mkdtemp(dir=self.temp_dir.name))
         config_file = directory / "config.json"
-        self.replace_global("write_config", "CONFIG_FILE", config_file)
 
-        self.runtime["write_config"]({"mode": "SMART"})
-        self.runtime["write_config"]({"mode": "VERBATIM"})
+        with mock.patch.object(self.config, "CONFIG_FILE", config_file):
+            self.config.write_config({"mode": "SMART"})
+            self.config.write_config({"mode": "VERBATIM"})
 
         self.assertEqual(json.loads(config_file.read_text(encoding="utf-8")), {"mode": "VERBATIM"})
         self.assertEqual(list(directory.iterdir()), [config_file])
