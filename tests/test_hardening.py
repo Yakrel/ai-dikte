@@ -72,6 +72,22 @@ class HardeningTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("supported-desktop", report)
 
+    def test_hyprland_doctor_fails_when_binding_is_missing(self) -> None:
+        config_file = Path(self.temp_dir.name) / "configured.json"
+        config_file.write_text("{}", encoding="utf-8")
+        missing_binding = Path(self.temp_dir.name) / "bindings.lua"
+        with mock.patch.object(self.core, "IS_WINDOWS", False), \
+             mock.patch.object(self.core, "CONFIG_FILE", config_file), \
+             mock.patch.object(self.core, "desktop_kind", return_value="hyprland"), \
+             mock.patch.object(self.core, "load_config", return_value={"api_key": "key"}), \
+             mock.patch.object(self.core, "available_output_driver", return_value="wtype"), \
+             mock.patch.object(self.core, "hyprland_shortcut_target", return_value=(missing_binding, "", "# >>> ai-dikte >>>", "# <<< ai-dikte <<<")), \
+             mock.patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-1"}), \
+             mock.patch("shutil.which", return_value="/usr/bin/tool"):
+            report, ok = self.core.doctor_report()
+        self.assertFalse(ok)
+        self.assertIn("[FAIL] Meta+Z Hyprland binding", report)
+
     def test_linux_fatal_error_notification_is_best_effort(self) -> None:
         import ai_dikte
         stderr = io.StringIO()

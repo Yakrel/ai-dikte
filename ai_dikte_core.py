@@ -10,7 +10,6 @@ import asyncio
 import base64
 import json
 import os
-import queue
 import shutil
 import signal
 import subprocess
@@ -220,7 +219,7 @@ def notify(
         log_session_event(f"Notification failed: {exc}")
 
 
-def fail(message: str, code: int = 1) -> None:
+def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
@@ -317,7 +316,7 @@ def selected_output_driver() -> str:
     raise RuntimeError("Unsupported desktop: use KDE Plasma or Hyprland on Wayland.")
 
 
-def available_output_driver(_config: dict[str, Any] | None = None) -> str | None:
+def available_output_driver() -> str | None:
     if IS_WINDOWS:
         return "sendinput"
     driver = selected_output_driver()
@@ -1657,7 +1656,7 @@ def doctor() -> None:
     desktop = desktop_kind()
     driver_error = None
     try:
-        driver = available_output_driver(config)
+        driver = available_output_driver()
     except RuntimeError as exc:
         driver = None
         driver_error = str(exc)
@@ -1683,6 +1682,20 @@ def doctor() -> None:
             "api-key": bool(str(config.get("api_key", "")).strip()),
             "direct-typing": bool(driver),
         }
+        if desktop == "hyprland":
+            target, _, start_marker, _ = hyprland_shortcut_target()
+            installed = False
+            if target.exists():
+                try:
+                    content = target.read_text(encoding="utf-8")
+                    installed = (
+                        start_marker in content
+                        or HYPR_MARKER_START_CONF in content
+                        or HYPR_MARKER_START_LUA in content
+                    )
+                except OSError:
+                    pass
+            checks[f"Meta+Z Hyprland binding ({target.name})"] = installed
 
     for name, ok in checks.items():
         if name in ("direct-typing", "direct-typing (SendInput)") and driver:
@@ -1700,24 +1713,6 @@ def doctor() -> None:
     print(f"i model: {MODEL}")
     if IS_WINDOWS:
         print("i hotkey: win+z")
-
-    if not IS_WINDOWS and desktop == "hyprland":
-        target, _, start_marker, _ = hyprland_shortcut_target()
-        installed = False
-        if target.exists():
-            try:
-                content = target.read_text(encoding="utf-8")
-                installed = (
-                    start_marker in content
-                    or HYPR_MARKER_START_CONF in content
-                    or HYPR_MARKER_START_LUA in content
-                )
-            except OSError:
-                pass
-        print(
-            f"{'[OK]' if installed else '[FAIL]'} "
-            f"Meta+Z Hyprland binding ({target.name})"
-        )
 
     if not all(checks.values()):
         raise SystemExit(1)
@@ -1757,8 +1752,6 @@ def main() -> None:
     with FileLock(LOCK_FILE):
         if command == "toggle":
             toggle()
-        elif command == "setup":
-            setup()
         elif command == "doctor":
             doctor()
         elif command == "shortcut-install":
