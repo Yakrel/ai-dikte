@@ -106,6 +106,7 @@ def ensure_runtime() -> None:
         except OSError:
             pass
 
+
 def log_session_event(msg: str) -> None:
     """Append non-sensitive diagnostic metadata to session.log."""
     try:
@@ -230,6 +231,7 @@ def microphone_label(config: dict[str, Any]) -> str:
     except Exception:
         pass
     return f"{selected}: {'Unavailable'}"
+
 
 def microphone_available(config: dict[str, Any]) -> bool:
     if sounddevice is None:
@@ -476,7 +478,7 @@ def session_matches(pid: int) -> bool:
 
     args = [os.fsdecode(arg) for arg in cmdline if arg]
     return "_live-session" in args and any(
-        Path(arg).name in ("ai-dikte", "gemini-dikte") for arg in args
+        Path(arg).name in ("ai-dikte", "gemini-dikte", "ai_dikte.py") for arg in args
     )
 
 
@@ -759,7 +761,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
         vocabulary = config_vocabulary(config)
         if vocabulary:
             input_transcription["customVocabulary"] = vocabulary
-    
+
         setup_message = {
             "setup": {
                 "model": f"models/{MODEL}",
@@ -772,7 +774,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
         }
         await websocket.send(json.dumps(setup_message))
         log_session_event("Sent Gemini setup message.")
-    
+
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
@@ -791,7 +793,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
                 raise RuntimeError(
                     f"Gemini Live API connection closed during setup ({code}): {reason}"
                 ) from exc
-    
+
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8", errors="replace")
             message = json.loads(raw)
@@ -802,7 +804,7 @@ async def open_live_websocket(api_key: str, config: dict[str, Any]):
             if "setupComplete" in message:
                 log_session_event("Gemini setup complete.")
                 return websocket
-    
+
         await websocket.close()
         raise RuntimeError("Gemini Live API setup timed out.")
     except BaseException:
@@ -1242,6 +1244,7 @@ def set_windows_startup_enabled(enabled: bool) -> None:
             except FileNotFoundError:
                 pass
 
+
 def launch_windows_daemon_restart() -> None:
     if not IS_WINDOWS:
         raise RuntimeError("Daemon restart is only available on Windows.")
@@ -1388,7 +1391,6 @@ def run_daemon() -> None:
     global _GLOBAL_TRAY_ICON
     hide_private_windows_console()
 
-
     if not IS_WINDOWS:
         raise RuntimeError("Linux uses the desktop Meta+Z shortcut; daemon mode is Windows-only.")
     config = load_config()
@@ -1397,8 +1399,6 @@ def run_daemon() -> None:
     print("[*] Starting AI Dikte daemon...")
     print(f"[*] Dictation hotkey: {hotkey}")
 
-    if not IS_WINDOWS:
-        raise RuntimeError("Linux uses the desktop Meta+Z shortcut; daemon mode is Windows-only.")
     get_windows_osd()
     setup_windows_keyboard_hook(toggle, log_session_event)
     print("[OK] Global Windows hook registered for: Win+Z")
@@ -1607,6 +1607,7 @@ def run_daemon() -> None:
                         tray_icon.title = new_state[1]
                     except Exception:
                         pass
+
         def tray_setup(icon):
             icon.visible = True
             threading.Thread(target=tray_state_monitor, daemon=True).start()
@@ -1699,7 +1700,6 @@ def main() -> None:
         restart_windows_daemon(int(sys.argv[2]))
         return
 
-
     if command.startswith("_tray-"):
         run_tray_gui_command(command.removeprefix("_tray-"))
         return
@@ -1729,4 +1729,3 @@ def main() -> None:
                 "{toggle|daemon|setup|doctor|shortcut-install|shortcut-remove}"
             )
             raise SystemExit(2)
-
