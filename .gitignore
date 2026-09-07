@@ -10,4 +10,5 @@ build/
 *.tar.gz
 dist/
 *.spec
+!packaging/fedora/*.spec
 .venv/

@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from ai_dikte_config import (
@@ -156,6 +157,7 @@ class FileLock:
             self.file_handle.close()
 
 
+@lru_cache(maxsize=4)
 def _audio_cue_wave(cue: str) -> bytes:
     """Build a tiny in-memory WAV so cues use the normal Windows audio output."""
     import io
@@ -202,15 +204,22 @@ def _audio_cue_wave(cue: str) -> bytes:
     return output.getvalue()
 
 
-def play_audio_cue(cue: str) -> None:
-    if not IS_WINDOWS or not config_audio_cue(load_config(required=False)):
+def play_audio_cue(cue: str, *, preview: bool = False) -> None:
+    if not IS_WINDOWS:
+        return
+    if not preview and not config_audio_cue(load_config(required=False)):
         return
 
+    import winsound
+    sound = _audio_cue_wave(cue)
     try:
-        import winsound
-        winsound.PlaySound(_audio_cue_wave(cue), winsound.SND_MEMORY)
-    except Exception as exc:
-        # Audio feedback is ancillary: never break dictation because playback failed.
+        winsound.PlaySound(sound, winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+    except RuntimeError as exc:
+        if preview:
+            raise RuntimeError(
+                "Could not play the audio cue. Check the Windows output device and volume mixer."
+            ) from exc
+        # Feedback failure must not invalidate a successfully inserted transcript.
         log_session_event(f"Audio cue failed ({cue}): {type(exc).__name__}: {exc}")
 
 
@@ -1168,6 +1177,8 @@ async def live_session(
         if sd_recorder is not None:
             # Stop capture first so the callback cannot race with the queue drain.
             sd_recorder.stop()
+            # Flush blocks already posted by the PortAudio thread before draining.
+            await asyncio.sleep(0)
             drain_count = 0
             while not sd_recorder.queue.empty():
                 try:
@@ -1196,9 +1207,7 @@ async def live_session(
                 chunks_sent += 1
 
         if not has_sent_audio:
-            dummy_chunk = b"\x00\x00" * 1600
-            await send_audio(websocket, dummy_chunk)
-            log_session_event("Sent one silence chunk for empty-recording guard.")
+            raise RuntimeError("No audio was captured. Check the microphone and try again.")
 
         await websocket.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
         log_session_event(
@@ -1460,7 +1469,7 @@ def run_tray_gui_command(subcmd: str) -> bool:
         save=save_settings,
         diagnostics=doctor_report,
         lock=lambda: FileLock(LOCK_FILE),
-        audio_cues=IS_WINDOWS,
+        preview_audio=(lambda: play_audio_cue("start", preview=True)) if IS_WINDOWS else None,
         devices=list_input_devices if IS_WINDOWS else None,
         get_startup=windows_startup_enabled if IS_WINDOWS else None,
         set_startup=set_windows_startup_enabled if IS_WINDOWS else None,

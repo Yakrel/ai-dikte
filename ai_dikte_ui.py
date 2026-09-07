@@ -16,7 +16,7 @@ class SettingsServices:
     save: Callable[[str, dict], None]
     diagnostics: Callable[[], tuple[str, bool]]
     lock: Callable[[], AbstractContextManager]
-    audio_cues: bool = False
+    preview_audio: Callable[[], None] | None = None
     devices: Callable[[], list[tuple[int | None, str]]] | None = None
     get_startup: Callable[[], bool] | None = None
     set_startup: Callable[[bool], None] | None = None
@@ -96,9 +96,20 @@ def show_dialog(command: str, services: SettingsServices) -> bool:
             ttk.Label(frame, text="Microphone").grid(row=7, column=0, sticky="w")
             ttk.Combobox(frame, textvariable=device, values=device_labels, state="readonly").grid(
                 row=7, column=1, sticky="ew", pady=5)
-            if services.audio_cues:
-                ttk.Checkbutton(frame, text="Play audio cues (start / stop / finish)", variable=cue).grid(
-                    row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
+            if services.preview_audio:
+                audio_controls = ttk.Frame(frame)
+                audio_controls.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+                ttk.Checkbutton(audio_controls, text="Play audio cues", variable=cue).pack(side="left")
+
+                def preview_audio() -> None:
+                    try:
+                        services.preview_audio()
+                    except Exception as exc:
+                        status.set(str(exc))
+                    else:
+                        status.set("Sound sent to Windows. If inaudible, check the output device and volume mixer.")
+
+                ttk.Button(audio_controls, text="Test sound", command=preview_audio).pack(side="right")
             ttk.Checkbutton(frame, text="Show visual status notifications (errors always appear)", variable=notifications).grid(
                 row=9, column=0, columnspan=2, sticky="w")
             if services.set_startup:

@@ -24,7 +24,7 @@ AI Dikte deliberately keeps a small support matrix:
 
 The **runtime target is the desktop/compositor, not the distribution**. The KDE path is intended for the KDE Plasma Wayland systems I use, including **Fedora KDE, CachyOS KDE, and NixOS KDE**. Omarchy uses the Hyprland path.
 
-The provided one-line Linux installer is currently **Arch-based only** and is intended for **Arch / CachyOS / Omarchy**. Fedora and NixOS remain runtime targets, but their distro-native packaging is intentionally not bundled into this installer.
+The one-line Linux installer remains **Arch-based only** for **Arch / CachyOS / Omarchy**. Fedora KDE has native RPM packages; NixOS has locked KDE and Hyprland flake packages. These use the same runtime and settings UI, not separate distro implementations.
 
 **Not supported:** GNOME, X11 sessions, and other compositors/desktops. Unsupported sessions fail explicitly instead of trying another backend.
 
@@ -49,6 +49,8 @@ The app uses `gemini-3.5-transcribe-live` with:
 - raw 16-bit PCM mono audio at 16 kHz.
 
 Final transcript segments are appended in order, including intentional repetitions. The app waits for completion and pending final text; a timeout or premature disconnect reports an error instead of silently typing an incomplete transcript.
+
+Stopping capture flushes audio already delivered by the recorder before ending the API turn. If the microphone delivered no audio, the session fails explicitly; it never substitutes generated silence.
 
 ---
 
@@ -106,19 +108,46 @@ ai-dikte setup
 ai-dikte doctor
 ```
 
-### Fedora KDE / NixOS KDE
+### Fedora 44 KDE (x86_64)
 
-The core runtime is intentionally not tied to Arch paths anymore: the installed launcher resolves its sibling `lib/ai-dikte` directory and invokes `python3` through `PATH`, while desktop entries resolve `ai-dikte` / `ai-dikte-toggle` through `PATH` as well.
-
-A distro-native Fedora or NixOS installer/package is not provided here yet. For source testing, install the equivalent dependencies for the distribution and run:
+Download the `ai-dikte-fedora-44-x86_64` artifact from a successful **Fedora KDE packages** run in [GitHub Actions](https://github.com/Yakrel/ai-dikte/actions/workflows/fedora.yml). It contains the application RPM, the pinned native `kwtype` RPM, and `SHA256SUMS`. Extract it, then run in that directory:
 
 ```bash
-python ai_dikte.py setup
-python ai_dikte.py doctor
-python ai_dikte.py toggle
+sha256sum --check SHA256SUMS
+sudo dnf install ./kwtype-*.rpm ./ai-dikte-*.rpm
+ai-dikte setup
+ai-dikte doctor
 ```
 
-KDE still requires `kwtype`, PipeWire, Tk, and the other runtime dependencies. Distro packaging should install the included KDE desktop entry so `Meta+Z` is registered normally.
+DNF installs the Python, Tk/XWayland, PipeWire and notification dependencies. The RPM includes the KDE `Meta+Z` shortcut entry. This is a local-RPM installation, not a configured package repository: download and install a newer artifact to update.
+
+These are unsigned CI RPMs; verify the checksums from a trusted workflow artifact before installing.
+
+### NixOS (x86_64)
+
+With flakes enabled, install **one** package matching your desktop:
+
+```bash
+nix profile install github:Yakrel/ai-dikte#ai-dikte-kde
+# Or, on Hyprland:
+nix profile install github:Yakrel/ai-dikte#ai-dikte-hyprland
+```
+
+For a declarative NixOS configuration, add `inputs.ai-dikte.url = "github:Yakrel/ai-dikte";` to your flake and include the selected package in your module:
+
+```nix
+{ inputs, ... }: {
+  environment.systemPackages = [
+    inputs.ai-dikte.packages.x86_64-linux.ai-dikte-kde
+  ];
+}
+```
+
+Pass `inputs` through your configuration's `specialArgs` as usual. The package supplies its own Python/websockets/Tk and only the selected typing backend; it does not use system Python packages. Your system must still provide the supported Wayland desktop, PipeWire service and XWayland for Tk.
+
+After installing, run `ai-dikte setup` and `ai-dikte doctor`. On Hyprland, install the managed binding with `ai-dikte shortcut-install`; if your compositor configuration is declaratively managed, declare `SUPER, Z, exec, ai-dikte-toggle` there instead. KDE packages include the global shortcut entry.
+
+`flake.lock` pins nixpkgs, and KWtype uses the same pinned upstream revision as the Arch and Fedora packages. The generic Linux launcher also resolves profile symlinks before locating the application's modules.
 
 ---
 
@@ -152,14 +181,16 @@ Typical configuration:
 - `mode`: `SMART` or `VERBATIM`.
 - `custom_vocabulary`: up to 1000 unique non-empty terms.
 - `input_device`: Windows SoundDevice input index; Linux uses the PipeWire system default.
-- `audio_cue`: Windows recording sounds.
-- `notify_mode`: `all` or `none`; critical errors remain visible.
+- `audio_cue`: Windows recording sounds, independent of visual notifications.
+- `notify_mode`: visual status notifications, `all` or `none`; critical errors remain visible even when ordinary notifications are off.
 
 `output_driver` and `hotkey` are intentionally **not configuration options**. Supported platforms have deterministic backend and shortcut choices.
 
 The shared settings UI is English-only; the dictation language itself remains configurable.
 
 API-key, language, mode, and vocabulary changes are validated against the Live API before saving. Purely local preferences do not require a network validation call.
+
+On Windows, **Play audio cues** and **Show visual status notifications** are separate switches. **Test sound** plays the same WAV/`PlaySound` path used during dictation without saving settings, contacting Gemini, or requiring an API key. It works even when recording cues are disabled. Playback errors appear in the dialog; if Windows accepts playback but you hear nothing, check the selected Windows output device and the app's volume/mute setting in Volume Mixer. There is no fallback beep or alternate playback backend. During dictation, an audio-feedback failure is logged rather than undoing successful text insertion.
 
 ---
 
@@ -217,6 +248,10 @@ The Windows workflow runs runtime tests, installer failure-path tests, source/fr
 
 The Arch workflow runs Python/shell checks, Tk UI tests under Xvfb, builds the base Arch package, runs the installed package self-test, and builds the pinned KDE `kwtype` backend package.
 
+The Fedora workflow builds both RPMs from the checked-out source, installs them in Fedora 44, and exercises the installed application outside the checkout before uploading RPMs and checksums.
+
+The Nix workflow builds both locked desktop variants and exercises each installed launcher with no host Python or tools on `PATH`.
+
 GitHub Actions artifacts are retained for 7 days. Scheduled cleanup keeps only the newest completed workflow runs needed for maintenance.
 
 Real microphone, Wayland shortcut registration, focused-window typing, and a live Gemini session still require a manual smoke test on the actual target desktop.
@@ -250,3 +285,11 @@ rm -rf ~/.config/ai-dikte
 ```
 
 If the installer created `ai-dikte-kwtype`, remove that package too. If you already had another `kwtype` package, keep it if it is used elsewhere.
+
+### Fedora KDE
+
+Run `sudo dnf remove ai-dikte`. Remove `kwtype` separately only if nothing else uses it. Delete `~/.config/ai-dikte` if you also want to remove the configuration and API key.
+
+### NixOS
+
+Remove the package from `environment.systemPackages` and rebuild your system. For a profile install, use `nix profile list` and then `nix profile remove` with the displayed package name. Remove any managed Hyprland binding before uninstalling; declarative bindings should be removed from your compositor configuration. Configuration and the API key remain under `~/.config/ai-dikte` until explicitly deleted.
