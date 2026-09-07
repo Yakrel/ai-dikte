@@ -1,0 +1,38 @@
+name: Nix packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [ai-dikte-kde, ai-dikte-hyprland]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.35.2/install
+          enable_kvm: false
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build locked package
+        run: nix build --no-update-lock-file --print-build-logs .#${{ matrix.package }}
+
+      - name: Exercise installed launcher without host Python dependencies
+        run: |
+          package="$(readlink -f result)"
+          cd "$RUNNER_TEMP"
+          env -i HOME="$RUNNER_TEMP" PATH=/nonexistent "$package/bin/ai-dikte" --version
+          env -i HOME="$RUNNER_TEMP" PATH=/nonexistent "$package/bin/ai-dikte" --self-test

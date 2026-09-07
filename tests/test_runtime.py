@@ -137,6 +137,61 @@ class RuntimeContractTests(unittest.TestCase):
         validate.assert_not_called()
         save.assert_called_once_with("working-key", candidate)
 
+    def test_audio_preview_is_explicit_and_uses_a_non_silent_wave(self) -> None:
+        import io
+        import struct
+        import wave
+        play_sound = mock.Mock()
+        fake_winsound = SimpleNamespace(SND_MEMORY=4, SND_NODEFAULT=2, PlaySound=play_sound)
+        self.replace_global("play_audio_cue", "IS_WINDOWS", True)
+        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": False})
+        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):
+            self.runtime["play_audio_cue"]("start")
+            play_sound.assert_not_called()
+            self.runtime["play_audio_cue"]("start", preview=True)
+        payload, _flags = play_sound.call_args.args
+        with wave.open(io.BytesIO(payload), "rb") as sound:
+            frames = sound.readframes(sound.getnframes())
+        samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+        self.assertLess(min(samples), 0)
+        self.assertGreater(max(samples), 0)
+
+    def test_audio_failure_is_visible_in_preview_but_does_not_abort_feedback(self) -> None:
+        fake_winsound = SimpleNamespace(
+            SND_MEMORY=4, SND_NODEFAULT=2,
+            PlaySound=mock.Mock(side_effect=RuntimeError("no audio device")),
+        )
+        log = mock.Mock()
+        self.replace_global("play_audio_cue", "IS_WINDOWS", True)
+        self.replace_global("play_audio_cue", "load_config", lambda required=False: {"audio_cue": True})
+        self.replace_global("play_audio_cue", "log_session_event", log)
+        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):
+            self.runtime["play_audio_cue"]("stop")
+            with self.assertRaisesRegex(RuntimeError, "Windows output device"):
+                self.runtime["play_audio_cue"]("start", preview=True)
+        self.assertIn("no audio device", log.call_args.args[0])
+
+    def test_feedback_channels_are_independent_and_errors_remain_visible(self) -> None:
+        sound, visual = mock.Mock(), mock.Mock()
+        config = {}
+        self.replace_global("notify", "IS_WINDOWS", True)
+        self.replace_global("notify", "load_config", lambda required=False: config)
+        self.replace_global("notify", "get_windows_osd", lambda: SimpleNamespace(show=visual))
+        fake_winsound = SimpleNamespace(SND_MEMORY=4, SND_NODEFAULT=2, PlaySound=sound)
+        with mock.patch.dict("sys.modules", {"winsound": fake_winsound}):
+            for audio_enabled, visual_enabled in ((False, False), (False, True), (True, False), (True, True)):
+                with self.subTest(audio=audio_enabled, visual=visual_enabled):
+                    config.update(audio_cue=audio_enabled, notify_mode="all" if visual_enabled else "none")
+                    sound.reset_mock()
+                    visual.reset_mock()
+                    self.runtime["play_audio_cue"]("start")
+                    self.runtime["notify"]("AI Dikte", "Recording started", event_type="start")
+                    self.assertEqual(sound.call_count, int(audio_enabled))
+                    self.assertEqual(visual.call_count, int(visual_enabled))
+                    visual.reset_mock()
+                    self.runtime["notify"]("AI Dikte", "Microphone failed", "critical", event_type="error")
+                    self.assertIn("Microphone failed", visual.call_args.args[0])
+
     def test_api_preferences_validate_before_saving(self) -> None:
         existing = self.runtime["build_setup_config"]({})
         self.replace_global("save_settings", "load_config", lambda required=False: existing)
@@ -249,11 +304,65 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(command[-1], expected)
 
 
+class RecordingBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def run_stopped_session(self, audio: bytes) -> list[dict]:
+        import ai_dikte_core as core
+        recorder = core.SoundDeviceStreamRecorder()
+        messages = []
+        ended = asyncio.Event()
+
+        async def send(raw):
+            message = json.loads(raw)["realtimeInput"]
+            messages.append(message)
+            if "activityStart" in message and audio:
+                # PortAudio has delivered the last block, but its event-loop
+                # callback has not run when the user requests stop.
+                recorder._callback(audio, len(audio) // 2, None, None)
+            if "activityEnd" in message:
+                ended.set()
+
+        async def receive(_websocket, transcripts, complete):
+            await ended.wait()
+            await transcripts.put(("final", "Recorded."))
+            complete.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.multiple(core,
+                IS_WINDOWS=True, websockets=SimpleNamespace(),
+                RUNTIME_DIR=root, SESSION_LOG=root / "session.log",
+                READY_FILE=root / "ready", ERROR_FILE=root / "error",
+                load_config=lambda: {}, load_api_key=lambda: "key",
+                notify=mock.Mock(), play_audio_cue=mock.Mock(),
+                log_session_event=mock.Mock(), clear_runtime_state=mock.Mock(),
+                SoundDeviceStreamRecorder=lambda **_kwargs: recorder,
+                sounddevice=SimpleNamespace(RawInputStream=mock.Mock(return_value=mock.Mock())),
+                open_live_websocket=mock.AsyncMock(return_value=SimpleNamespace(
+                    send=send, close=mock.AsyncMock())),
+                receive_transcriptions=receive, output_text=mock.Mock(return_value="sendinput"),
+            ):
+                await core.live_session(stop_checker=lambda: True)
+        return messages
+
+    async def test_stop_flushes_audio_already_delivered_by_portaudio(self):
+        import base64
+        audio = b"\x12\x34" * 1600
+        messages = await self.run_stopped_session(audio)
+        sent = b"".join(base64.b64decode(m["audio"]["data"]) for m in messages if "audio" in m)
+        self.assertEqual(sent, audio)
+
+    async def test_empty_capture_fails_instead_of_sending_synthetic_silence(self):
+        with self.assertRaisesRegex(RuntimeError, "No audio was captured"):
+            await self.run_stopped_session(b"")
+
+
 class TranscriptTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         import ai_dikte_core
         self.runtime = vars(ai_dikte_core)
-        self.runtime["collect_final_transcript"].__globals__["log_session_event"] = lambda message: None
+        self.log_patch = mock.patch.object(ai_dikte_core, "log_session_event")
+        self.log_patch.start()
+        self.addCleanup(self.log_patch.stop)
         self.queue = asyncio.Queue()
         self.complete = asyncio.Event()
         self.receiver = asyncio.create_task(asyncio.sleep(60))
