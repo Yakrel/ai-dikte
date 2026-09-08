@@ -147,6 +147,10 @@ pub mod credentials {
                     GetLastError()
                 );
             }
+            if (*cred).CredentialBlobSize == 0 || (*cred).CredentialBlob.is_null() {
+                CredFree(cred.cast());
+                bail!("API key credential is empty");
+            }
             let bytes = std::slice::from_raw_parts(
                 (*cred).CredentialBlob,
                 (*cred).CredentialBlobSize as usize,

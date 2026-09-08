@@ -82,10 +82,29 @@ impl Settings {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let result = (|| {
-                tokio::runtime::Runtime::new()?.block_on(live::validate_key(&config, &key))?;
+                let existing = if path.exists() {
+                    Some(Config::load(&path)?)
+                } else {
+                    None
+                };
+                let key_changed = match &existing {
+                    Some(old) => old.key().map(|old_key| old_key != key).unwrap_or(true),
+                    None => true,
+                };
+                let api_changed = key_changed
+                    || existing.as_ref().is_none_or(|old| {
+                        old.language != config.language
+                            || old.mode != config.mode
+                            || old.custom_vocabulary != config.custom_vocabulary
+                    });
+                if api_changed {
+                    tokio::runtime::Runtime::new()?.block_on(live::validate_key(&config, &key))?;
+                }
                 #[cfg(windows)]
                 {
-                    config::credentials::write(&key)?;
+                    if key_changed {
+                        config::credentials::write(&key)?;
+                    }
                 }
                 #[cfg(not(windows))]
                 {
@@ -179,4 +198,22 @@ impl eframe::App for Settings {
             });
         });
     }
+}
+
+pub fn text_window(title: &str, mut text: String) -> Result<()> {
+    eframe::run_simple_native(title, eframe::NativeOptions::default(), move |ctx, _| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if ui.button("Copy").clicked() {
+                ctx.copy_text(text.clone());
+            }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_width(f32::INFINITY)
+                        .interactive(false),
+                );
+            });
+        });
+    })
+    .map_err(|_| anyhow::anyhow!("Cannot open diagnostic window"))
 }

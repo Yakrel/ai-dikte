@@ -15,9 +15,11 @@ use windows_sys::Win32::{
 };
 const TRAY_MESSAGE: u32 = WM_APP + 1;
 const STATUS_MESSAGE: u32 = WM_APP + 2;
+static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static COMMANDS: OnceLock<mpsc::Sender<Command>> = OnceLock::new();
 static STATUS: Mutex<String> = Mutex::new(String::new());
 thread_local! {
+    static OSD: Cell<HWND> = const { Cell::new(null_mut()) };
     static CHORD: Cell<bool> = const { Cell::new(false) };
     static TRAY: RefCell<Option<NOTIFYICONDATAW>> = const { RefCell::new(None) };
 }
@@ -72,16 +74,40 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         CallNextHookEx(null_mut(), code, wp, lp)
     }
 }
-fn launch_setup() -> Result<()> {
+fn launch(command: &str) -> Result<()> {
     std::process::Command::new(std::env::current_exe()?)
-        .arg("setup")
+        .arg(command)
         .spawn()
         .context("Cannot open settings")?;
     Ok(())
 }
 unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
+        if TASKBAR_CREATED.get() == Some(&message) {
+            TRAY.with_borrow_mut(|tray| {
+                if let Some(tray) = tray {
+                    tray.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+                    if Shell_NotifyIconW(NIM_ADD, tray) == 0 {
+                        MessageBoxW(
+                            hwnd,
+                            wide("Cannot restore AI Dikte tray icon after Explorer restart")
+                                .as_ptr(),
+                            wide("AI Dikte").as_ptr(),
+                            MB_ICONERROR,
+                        );
+                    }
+                }
+            });
+            return 0;
+        }
         match message {
+            WM_TIMER => {
+                OSD.with(|osd| {
+                    ShowWindow(osd.get(), SW_HIDE);
+                });
+                KillTimer(hwnd, 1);
+                0
+            }
             TRAY_MESSAGE if lp as u32 == WM_LBUTTONDBLCLK => {
                 enqueue(Command::Toggle);
                 0
@@ -91,6 +117,15 @@ unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARA
                 if !menu.is_null() {
                     AppendMenuW(menu, MF_STRING, 1, wide("Start / stop (Win+Z)").as_ptr());
                     AppendMenuW(menu, MF_STRING, 2, wide("Settings").as_ptr());
+                    AppendMenuW(menu, MF_STRING, 4, wide("Diagnostics").as_ptr());
+                    AppendMenuW(menu, MF_STRING, 5, wide("Session log").as_ptr());
+                    let startup = startup_enabled().unwrap_or(false);
+                    AppendMenuW(
+                        menu,
+                        MF_STRING | if startup { MF_CHECKED } else { 0 },
+                        6,
+                        wide("Start with Windows").as_ptr(),
+                    );
                     AppendMenuW(menu, MF_STRING, 3, wide("Exit").as_ptr());
                     let mut point: POINT = std::mem::zeroed();
                     GetCursorPos(&mut point);
@@ -108,10 +143,32 @@ unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARA
                     match selected {
                         1 => enqueue(Command::Toggle),
                         2 => {
-                            if let Err(e) = launch_setup() {
+                            if let Err(e) = launch("setup") {
                                 MessageBoxW(
                                     hwnd,
                                     wide(&e.to_string()).as_ptr(),
+                                    wide("AI Dikte").as_ptr(),
+                                    MB_ICONERROR,
+                                );
+                            }
+                        }
+                        4 | 5 => {
+                            if let Err(error) =
+                                launch(if selected == 4 { "doctor" } else { "logs" })
+                            {
+                                MessageBoxW(
+                                    hwnd,
+                                    wide(&error.to_string()).as_ptr(),
+                                    wide("AI Dikte").as_ptr(),
+                                    MB_ICONERROR,
+                                );
+                            }
+                        }
+                        6 => {
+                            if let Err(error) = set_startup(!startup) {
+                                MessageBoxW(
+                                    hwnd,
+                                    wide(&error.to_string()).as_ptr(),
                                     wide("AI Dikte").as_ptr(),
                                     MB_ICONERROR,
                                 );
@@ -149,6 +206,22 @@ unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARA
                                 NIIF_INFO
                             };
                             Shell_NotifyIconW(NIM_MODIFY, tray);
+                            if enabled || status.starts_with("Error:") {
+                                OSD.with(|osd| {
+                                    SetWindowTextW(osd.get(), wide(&status).as_ptr());
+                                    ShowWindow(osd.get(), SW_SHOWNOACTIVATE);
+                                });
+                                SetTimer(
+                                    hwnd,
+                                    1,
+                                    if status.starts_with("Error:") {
+                                        8000
+                                    } else {
+                                        2500
+                                    },
+                                    None,
+                                );
+                            }
                         }
                     });
                 }
@@ -177,6 +250,11 @@ impl Drop for Resources {
             TRAY.with_borrow_mut(|tray| {
                 if let Some(data) = tray.take() {
                     Shell_NotifyIconW(NIM_DELETE, &data);
+                }
+            });
+            OSD.with(|osd| {
+                if !osd.get().is_null() {
+                    DestroyWindow(osd.replace(null_mut()));
                 }
             });
             if !self.window.is_null() {
@@ -231,6 +309,34 @@ pub fn daemon() -> Result<()> {
             bail!("Cannot create tray window");
         }
         resources.window = hwnd;
+        let taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
+        if taskbar_message == 0 {
+            bail!("Cannot register Explorer restart notification");
+        }
+        let _ = TASKBAR_CREATED.set(taskbar_message);
+        let mut area: RECT = std::mem::zeroed();
+        if SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut area as *mut RECT).cast(), 0) == 0 {
+            bail!("Cannot locate OSD work area");
+        }
+        let osd = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            wide("STATIC").as_ptr(),
+            wide("AI Dikte").as_ptr(),
+            WS_POPUP | WS_BORDER | windows_sys::Win32::System::SystemServices::SS_CENTER,
+            area.left + (area.right - area.left - 460) / 2,
+            area.bottom - 100,
+            460,
+            50,
+            hwnd,
+            null_mut(),
+            instance,
+            null(),
+        );
+        if osd.is_null() {
+            bail!("Cannot create recording status display");
+        }
+        OSD.with(|value| value.set(osd));
+
         let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
         tray.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
         tray.hWnd = hwnd;
@@ -275,5 +381,67 @@ pub fn daemon() -> Result<()> {
             .join()
             .map_err(|_| anyhow::anyhow!("Session worker panicked"))?;
         Ok(())
+    }
+}
+
+pub fn set_startup(enabled: bool) -> Result<()> {
+    use windows_sys::Win32::System::Registry::*;
+    unsafe {
+        let mut key = null_mut();
+        let result = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run").as_ptr(),
+            0,
+            null(),
+            0,
+            KEY_SET_VALUE,
+            null(),
+            &mut key,
+            null_mut(),
+        );
+        if result != ERROR_SUCCESS {
+            bail!("Cannot open startup registry key ({result})");
+        }
+        let result = if enabled {
+            let value = wide(&format!(
+                "\"{}\" daemon",
+                std::env::current_exe()?.display()
+            ));
+            RegSetValueExW(
+                key,
+                wide("AI-Dikte").as_ptr(),
+                0,
+                REG_SZ,
+                value.as_ptr().cast(),
+                (value.len() * 2) as u32,
+            )
+        } else {
+            RegDeleteValueW(key, wide("AI-Dikte").as_ptr())
+        };
+        RegCloseKey(key);
+        if result != ERROR_SUCCESS && !(result == ERROR_FILE_NOT_FOUND && !enabled) {
+            bail!("Cannot update startup setting ({result})");
+        }
+        Ok(())
+    }
+}
+pub fn startup_enabled() -> Result<bool> {
+    use windows_sys::Win32::System::Registry::*;
+    let mut bytes = 0;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run").as_ptr(),
+            wide("AI-Dikte").as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            null_mut(),
+            &mut bytes,
+        )
+    };
+    match result {
+        ERROR_SUCCESS => Ok(true),
+        ERROR_FILE_NOT_FOUND => Ok(false),
+        _ => bail!("Cannot read startup setting ({result})"),
     }
 }

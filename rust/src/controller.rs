@@ -10,6 +10,12 @@ pub enum Command {
     Quit,
 }
 pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
+    let report = |message: &str| {
+        if let Err(error) = crate::diagnostics::append(message) {
+            eprintln!("Cannot write session log: {error}");
+        }
+        report(message);
+    };
     while let Some(command) = commands.recv().await {
         if matches!(command, Command::Quit) {
             break;

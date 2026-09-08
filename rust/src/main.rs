@@ -18,6 +18,7 @@ enum Command {
     Toggle,
     Setup,
     Doctor,
+    Logs,
     /// Record until Ctrl+C, then type finalized text.
     Record,
 }
@@ -63,17 +64,18 @@ fn run() -> Result<()> {
         #[cfg(not(windows))]
         Command::Toggle => tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::toggle()),
         Command::Doctor => {
-            let path = config::path()?;
-            let config = Config::load(&path)?;
-            config.key()?;
+            let report = ai_dikte::diagnostics::report();
+            #[cfg(windows)]
+            {
+                ui::text_window("AI Dikte — Diagnostics", report)
+            }
             #[cfg(not(windows))]
-            println!("Typing backend: {}", ai_dikte::output::driver()?);
-            println!(
-                "Configuration valid. Model: {}. Live API and microphone not tested.",
-                ai_dikte::protocol::MODEL
-            );
-            Ok(())
+            {
+                println!("{report}");
+                Ok(())
+            }
         }
+        Command::Logs => ui::text_window("AI Dikte — Session log", ai_dikte::diagnostics::log()?),
         Command::Record => tokio::runtime::Runtime::new()?.block_on(async {
             let config = Config::load(&config::path()?)?;
             let (stop, stopped) = tokio::sync::oneshot::channel();
