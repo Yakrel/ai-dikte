@@ -40,7 +40,8 @@ Tamamlanan işleri yalnızca doğrulama kanıtıyla işaretle. Çalışma notlar
 - Linux ve Windows GNU hedefi `cargo clippy --all-targets -- -D warnings` geçti. Linux debug executable derlendi.
 - Gerçek Windows çalıştırma, mikrofon, Win+Z, tray ve Wayland testi yapılmadı.
 - API anahtarı olmadığından gerçek Gemini oturumu denenmedi.
-- İlk kod checkpoint (80182cb): GitHub Linux release build başarılı; Windows test/lint başarılı, release build kontrol edilecek. Son checkpoint için tekrar CI gereklidir.
+- İlk kod checkpoint (80182cb): GitHub Windows MSVC ve Linux test/lint/release derlemeleri başarılı: https://github.com/Yakrel/ai-dikte/actions/runs/34268923051
+- Son kod checkpoint (129677b): Windows/Linux lint geçti; test, GUI render ve release build devam ediyor: https://github.com/Yakrel/ai-dikte/actions/runs/34269569112
 - Yerelde Xvfb yok; paket kurulumu ortam izinleriyle engellendi. Linux CI içine Xvfb ayar ekranı render smoke testi eklendi.
 
 ## Kalan işler / sonraki adım
@@ -71,3 +72,6 @@ cargo run -- toggle
 - Linux: PipeWire varsayılan kaynağı; KDE yalnız kwtype, Hyprland yalnız wtype. Daemon açıkken ikinci daemon açık hata vermeli. Toggle sonrası metin odaktaki alana yazılmalı.
 - API: yanlış anahtar, kota hatası, bağlantı kopması ve sessiz mikrofon. Hatalarda kısmi metin veya alternatif backend kullanılmamalı; API anahtarı günlüğe yazılmamalı.
 - Rust paketleri ve Python kaldırma henüz yapılmadı; mevcut installer kullanılırsa hâlâ Python sürümü kurulur.
+
+## Sonraki oturumun ilk işi
+PR #8 / `rewrite/rust` dalında devam et. Önce 129677b commitinin Rust CI sonucuna bak; sonradan gelen yalnız dokümantasyon commitinin yeni Rust koşusu olmaması normaldir. `RUST_MIGRATION.md` listesini ilerledikçe ve PR açıklamasını aynı anda güncelle. En yeni CI artifact'i yerine eski Python workflow artifact'ini yanlışlıkla test etme: Rust workflow adı `Rust rewrite`.
