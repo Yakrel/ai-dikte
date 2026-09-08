@@ -172,7 +172,7 @@ Typical configuration:
     "Hyprland"
   ],
   "input_device": null,
-  "audio_cue": true,
+  "audio_cue": false,
   "notify_mode": "all"
 }
 ```

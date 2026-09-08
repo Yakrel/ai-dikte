@@ -423,6 +423,10 @@ class TranscriptTests(unittest.IsolatedAsyncioTestCase):
         await self.queue.put(("final", "Late final."))
         self.assertEqual(await collecting, "Late final.")
 
+    async def test_completes_when_turn_complete_signal_is_omitted(self):
+        await self.queue.put(("final", "Hello world."))
+        self.assertEqual(await self.collect(), "Hello world.")
+
 
 if __name__ == "__main__":
     unittest.main()

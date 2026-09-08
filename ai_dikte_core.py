@@ -166,20 +166,20 @@ def _audio_cue_wave(cue: str) -> bytes:
     import wave
 
     patterns = {
-        "start": [(880, 90)],
-        "stop": [(660, 90)],
-        "finish": [(880, 70), (1174, 90)],
-        "error": [(440, 140)],
+        "start": [(660, 80), (880, 90)],
+        "stop": [(880, 80), (660, 90)],
+        "finish": [(880, 70), (1174, 100)],
+        "error": [(440, 100), (330, 140)],
     }
     if cue not in patterns:
         raise ValueError(f"Unknown audio cue: {cue}")
 
     sample_rate = 22050
-    amplitude = int(32767 * 0.22)
-    fade_samples = max(1, int(sample_rate * 0.005))
+    amplitude = int(32767 * 0.35)
+    fade_samples = max(1, int(sample_rate * 0.008))
     gap_samples = int(sample_rate * 0.015)
-    frames = bytearray()
-
+    preroll_samples = int(sample_rate * 0.040)
+    frames = bytearray(b"\x00\x00" * preroll_samples)
     for note_index, (frequency, duration_ms) in enumerate(patterns[cue]):
         sample_count = max(1, int(sample_rate * duration_ms / 1000))
         for index in range(sample_count):
@@ -1005,12 +1005,14 @@ async def collect_final_transcript(
     while True:
         await raise_if_receiver_failed(receiver_task)
         now = time.monotonic()
-        if turn_complete_event.is_set() and complete_since is None:
+        if (turn_complete_event.is_set() or (final_segments and not pending_interim)) and complete_since is None:
             complete_since = now
         if (complete_since is not None and transcripts.empty() and not pending_interim
                 and now - max(complete_since, last_update) >= 0.5):
             break
         if now >= deadline:
+            if final_segments and not pending_interim:
+                break
             raise RuntimeError("Timed out waiting for the final transcription. Please try again.")
         if receiver_task.done() and transcripts.empty():
             if turn_complete_event.is_set() and not pending_interim:
@@ -1026,8 +1028,10 @@ async def collect_final_transcript(
         if kind == "final":
             merge_final_segment(final_segments, text)
             pending_interim = False
+            complete_since = last_update
         elif kind == "interim":
             pending_interim = bool(text.strip())
+            complete_since = None
     result = " ".join(final_segments).strip()
     if not result:
         raise RuntimeError("Gemini returned no transcription.")
@@ -1469,7 +1473,7 @@ def run_tray_gui_command(subcmd: str) -> bool:
         save=save_settings,
         diagnostics=doctor_report,
         lock=lambda: FileLock(LOCK_FILE),
-        preview_audio=(lambda: play_audio_cue("start", preview=True)) if IS_WINDOWS else None,
+        preview_audio=(lambda: play_audio_cue("finish", preview=True)) if IS_WINDOWS else None,
         devices=list_input_devices if IS_WINDOWS else None,
         get_startup=windows_startup_enabled if IS_WINDOWS else None,
         set_startup=set_windows_startup_enabled if IS_WINDOWS else None,

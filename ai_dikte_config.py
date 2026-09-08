@@ -96,7 +96,7 @@ def config_vocabulary(config: dict[str, Any]) -> list[str]:
 
 
 def config_audio_cue(config: dict[str, Any]) -> bool:
-    value = config.get("audio_cue", True)
+    value = config.get("audio_cue", False)
     if not isinstance(value, bool):
         raise RuntimeError("Config 'audio_cue' must be true or false.")
     return value
