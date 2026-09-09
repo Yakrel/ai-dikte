@@ -3,7 +3,7 @@
 #   irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 
 [CmdletBinding()]
-param()
+param([string]$ArtifactDirectory)
 
 $ErrorActionPreference = "Stop"
 
@@ -19,11 +19,8 @@ Write-Host "${BOLD}${BLUE}==>${NC} ${BOLD}AI Dikte Installer for Windows${NC}"
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\AI-Dikte"
 $exePath = Join-Path $installDir "ai-dikte.exe"
 $cmdLauncher = Join-Path $installDir "ai-dikte.cmd"
-$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$appName = "AI-Dikte"
 $programsFolder = [Environment]::GetFolderPath("Programs")
 $startMenuLnk = Join-Path $programsFolder "AI Dikte.lnk"
-$runtimeOverride = Join-Path $installDir "ai-dikte"
 $downloadExe = Join-Path $env:TEMP "ai-dikte-windows-$PID.exe"
 $downloadChecksum = "$downloadExe.sha256"
 
@@ -59,12 +56,6 @@ function Set-PreferredUserPath {
     $newPath = (@($Preferred) + $parts) -join ';'
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
     $env:Path = "$Preferred;$env:Path"
-}
-
-function Remove-LegacyStartupFiles {
-    $startupFolder = [Environment]::GetFolderPath("Startup")
-    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.vbs") -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.cmd") -Force -ErrorAction SilentlyContinue
 }
 
 function Start-DaemonProcess {
@@ -114,6 +105,10 @@ function Stop-InstalledDaemon {
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
 try {
+    if ($ArtifactDirectory) {
+        Copy-Item (Join-Path $ArtifactDirectory "ai-dikte-windows.exe") $downloadExe
+        Copy-Item (Join-Path $ArtifactDirectory "ai-dikte-windows.exe.sha256") $downloadChecksum
+    } else {
     Write-Host "${BOLD}${BLUE}==>${NC} Looking for the latest standalone Windows release..."
     $release = Invoke-RestMethod `
         -Uri "https://api.github.com/repos/Yakrel/ai-dikte/releases/tags/latest" `
@@ -132,6 +127,8 @@ try {
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $downloadExe
     Invoke-WebRequest -Uri $checksumAsset.browser_download_url -OutFile $downloadChecksum
 
+    }
+
     $checksumText = (Get-Content -Path $downloadChecksum -Raw).Trim()
     $checksumMatch = [regex]::Match($checksumText, '\A([a-fA-F0-9]{64})(?:\s|$)')
     if (-not $checksumMatch.Success) {
@@ -145,14 +142,13 @@ try {
 
     Unblock-File -Path $downloadExe
     Write-Host "${BOLD}${BLUE}==>${NC} Verifying standalone executable..."
-    $verifyProc = Start-Process -FilePath $downloadExe -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
+    $verifyProc = Start-Process -FilePath $downloadExe -ArgumentList "self-test" -Wait -PassThru -NoNewWindow
     if ($verifyProc.ExitCode -ne 0) {
         throw "Standalone executable self-test failed with exit code $($verifyProc.ExitCode)"
     }
 
     Stop-InstalledDaemon -ExecutablePaths @($exePath)
     Move-Item -Path $downloadExe -Destination $exePath -Force
-    Remove-Item -Path $runtimeOverride -Force -ErrorAction SilentlyContinue
     Write-Host "${GREEN}[OK]${NC} Installed verified standalone executable: $exePath"
 }
 catch {
@@ -164,8 +160,7 @@ finally {
 
 ('@echo off' + "`r`n" + '"%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe" %*') | Out-File -FilePath $cmdLauncher -Encoding ASCII -Force
 Set-PreferredUserPath -Preferred $installDir
-Remove-LegacyStartupFiles
-Write-StartMenuShortcut -Executable $exePath -Arguments "daemon"
+Write-StartMenuShortcut -Executable $exePath -Arguments ""
 
 Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
 $setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
@@ -174,7 +169,7 @@ if ($setupProc.ExitCode -ne 0) {
 }
 
 Write-Host "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-$doctorProc = Start-Process -FilePath $exePath -ArgumentList "doctor" -Wait -PassThru -NoNewWindow
+$doctorProc = Start-Process -FilePath $exePath -ArgumentList "check-config" -Wait -PassThru -NoNewWindow
 if ($doctorProc.ExitCode -ne 0) {
     throw "AI Dikte diagnostics failed. Resolve the reported problem before starting dictation."
 }
@@ -182,6 +177,6 @@ if ($doctorProc.ExitCode -ne 0) {
 Start-DaemonProcess -Executable $exePath -Arguments "daemon"
 
 Write-Host ""
-Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Sign-in startup follows your Settings selection."
+Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Sign-in startup can be enabled from the tray menu."
 Write-Host "Command: ${BOLD}ai-dikte${NC}"
 exit 0

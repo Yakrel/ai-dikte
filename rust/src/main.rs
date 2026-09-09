@@ -10,6 +10,8 @@ use clap::{Parser, Subcommand};
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
+    #[arg(long)]
+    self_test: bool,
 }
 #[derive(Subcommand)]
 enum Command {
@@ -19,6 +21,12 @@ enum Command {
     Setup,
     Doctor,
     Logs,
+    SelfTest,
+    CheckConfig,
+    #[cfg(not(windows))]
+    ShortcutInstall,
+    #[cfg(not(windows))]
+    ShortcutRemove,
     /// Record until Ctrl+C, then type finalized text.
     Record,
 }
@@ -34,33 +42,61 @@ fn main() {
             use windows_sys::Win32::UI::WindowsAndMessaging::*;
             let message: Vec<u16> = format!("AI Dikte: {error:#}\0").encode_utf16().collect();
             let title: Vec<u16> = "AI Dikte\0".encode_utf16().collect();
-            unsafe {
-                MessageBoxW(
-                    std::ptr::null_mut(),
-                    message.as_ptr(),
-                    title.as_ptr(),
-                    MB_ICONERROR,
-                );
+            if !matches!(
+                std::env::args().nth(1).as_deref(),
+                Some("check-config" | "self-test" | "--self-test")
+            ) {
+                unsafe {
+                    MessageBoxW(
+                        std::ptr::null_mut(),
+                        message.as_ptr(),
+                        title.as_ptr(),
+                        MB_ICONERROR,
+                    );
+                }
             }
         }
         std::process::exit(1);
     }
 }
 fn run() -> Result<()> {
+    let args = Args::parse();
+    if args.self_test {
+        return ai_dikte::diagnostics::self_test();
+    }
     #[cfg(windows)]
-    let default = if config::path()?.exists() {
-        Command::Daemon
-    } else {
-        Command::Setup
+    let command = match args.command {
+        None => {
+            if !config::path()?.exists() {
+                ui::setup()?;
+                if !config::path()?.exists() {
+                    return Ok(());
+                }
+            }
+            Command::Daemon
+        }
+        Some(command) => command,
     };
     #[cfg(not(windows))]
-    let default = Command::Setup;
-    match Args::parse().command.unwrap_or(default) {
+    let command = args.command.unwrap_or(Command::Setup);
+    match command {
+        Command::SelfTest => ai_dikte::diagnostics::self_test(),
+        Command::CheckConfig => ai_dikte::diagnostics::check_configuration(),
+        #[cfg(not(windows))]
+        Command::ShortcutInstall => ai_dikte::shortcut::update(true),
+        #[cfg(not(windows))]
+        Command::ShortcutRemove => ai_dikte::shortcut::update(false),
         Command::Setup => ui::setup(),
         #[cfg(windows)]
-        Command::Daemon => ai_dikte::windows::daemon(),
+        Command::Daemon => {
+            ai_dikte::diagnostics::check_configuration()?;
+            ai_dikte::windows::daemon()
+        }
         #[cfg(not(windows))]
-        Command::Daemon => tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::daemon()),
+        Command::Daemon => {
+            ai_dikte::diagnostics::check_configuration()?;
+            tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::daemon())
+        }
         #[cfg(not(windows))]
         Command::Toggle => tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::toggle()),
         Command::Doctor => {

@@ -9,6 +9,8 @@ pub mod live;
 pub mod output;
 pub mod protocol;
 pub mod session;
+#[cfg(not(windows))]
+pub mod shortcut;
 pub mod ui;
 #[cfg(windows)]
 pub mod windows;

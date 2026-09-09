@@ -17,15 +17,14 @@ pub fn setup() -> Result<()> {
     #[cfg(not(windows))]
     let key = config.api_key.clone().unwrap_or_default();
     let vocabulary = config.custom_vocabulary.join("\n");
-    let device = config
-        .input_device
-        .map(|i| i.to_string())
-        .unwrap_or_default();
+    #[cfg(windows)]
+    let devices = crate::audio::input_devices()?;
     let app = Settings {
         config,
         key,
         vocabulary,
-        device,
+        #[cfg(windows)]
+        devices,
         path,
         status: String::new(),
         pending: None,
@@ -35,7 +34,10 @@ pub fn setup() -> Result<()> {
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([540.0, 650.0])
-                .with_min_inner_size([430.0, 450.0]),
+                .with_min_inner_size([430.0, 450.0])
+                .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(
+                    "../../ai-dikte.png"
+                ))?),
             ..Default::default()
         },
         Box::new(|_| Ok(Box::new(app))),
@@ -46,7 +48,8 @@ struct Settings {
     config: Config,
     key: String,
     vocabulary: String,
-    device: String,
+    #[cfg(windows)]
+    devices: Vec<String>,
     path: PathBuf,
     status: String,
     pending: Option<mpsc::Receiver<Result<()>>>,
@@ -55,16 +58,6 @@ impl Settings {
     fn save(&mut self) -> Result<()> {
         let mut config = self.config.clone();
         config.custom_vocabulary = self.vocabulary.lines().map(str::to_owned).collect();
-        config.input_device = if self.device.trim().is_empty() {
-            None
-        } else {
-            Some(
-                self.device
-                    .trim()
-                    .parse()
-                    .map_err(|_| anyhow::anyhow!("Mikrofon numarası geçersiz"))?,
-            )
-        };
         config.validate()?;
         #[cfg(not(windows))]
         if config.input_device.is_some() {
@@ -167,8 +160,34 @@ impl eframe::App for Settings {
                     );
                     #[cfg(windows)]
                     {
-                        ui.label("Mikrofon numarası (varsayılan için boş)");
-                        ui.text_edit_singleline(&mut self.device);
+                        ui.label("Mikrofon");
+                        egui::ComboBox::from_id_salt("microphone")
+                            .selected_text(
+                                self.config
+                                    .input_device
+                                    .as_deref()
+                                    .unwrap_or("Sistem varsayılanı"),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.config.input_device,
+                                    None,
+                                    "Sistem varsayılanı",
+                                );
+                                for name in &self.devices {
+                                    ui.selectable_value(
+                                        &mut self.config.input_device,
+                                        Some(name.clone()),
+                                        name,
+                                    );
+                                }
+                            });
+                        if ui.button("Mikrofon listesini yenile").clicked() {
+                            match crate::audio::input_devices() {
+                                Ok(devices) => self.devices = devices,
+                                Err(error) => self.status = error.to_string(),
+                            }
+                        }
                     }
                     #[cfg(not(windows))]
                     ui.label("Mikrofon: PipeWire varsayılan giriş aygıtı");

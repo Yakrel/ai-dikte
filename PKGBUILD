@@ -1,62 +1,89 @@
 pkgname=ai-dikte
-pkgver=0.4.0
-pkgrel=6
-pkgdesc='Minimal Wayland dictation using Gemini 3.5 Transcribe Live'
-arch=('any')
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='Rust voice dictation for KDE Plasma and Hyprland using Gemini Live'
+arch=('x86_64')
 url='https://github.com/Yakrel/ai-dikte'
 license=('MIT')
-depends=(
-  'libnotify'
-  'pipewire-audio'
-  'python'
-  'python-websockets'
-  'tk'
-  'xorg-xwayland'
-)
-optdepends=(
-  'wtype: direct text injection on Hyprland / Omarchy'
-  'ai-dikte-kwtype: direct text injection on KDE Plasma Wayland'
-)
+depends=('libnotify' 'pipewire-audio' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libglvnd' 'libx11' 'libxcursor' 'libxi' 'libxrandr')
+makedepends=('rust>=1.98' 'cargo' 'pkgconf')
+optdepends=('wtype: Hyprland text injection' 'ai-dikte-kwtype: KDE Plasma text injection')
+# Local source files and SHA256 values are generated below; no network source or SKIP hashes.
+# BEGIN GENERATED SOURCES
 source=(
-  'ai-dikte'
-  'ai_dikte.py'
-  'ai_dikte_core.py'
-  'ai_dikte_config.py'
-  'ai_dikte_ui.py'
-  'ai-dikte-settings.desktop'
+  'rust/Cargo.toml'
+  'rust/Cargo.lock'
+  'rust/build.rs'
+  'rust/src/audio.rs'
+  'rust/src/config.rs'
+  'rust/src/controller.rs'
+  'rust/src/cue.rs'
+  'rust/src/diagnostics.rs'
+  'rust/src/lib.rs'
+  'rust/src/linux.rs'
+  'rust/src/live.rs'
+  'rust/src/main.rs'
+  'rust/src/output.rs'
+  'rust/src/protocol.rs'
+  'rust/src/session.rs'
+  'rust/src/shortcut.rs'
+  'rust/src/ui.rs'
+  'rust/src/windows.rs'
   'ai-dikte.png'
+  'ai-dikte.ico'
   'ai-dikte-toggle'
   'ai-dikte.desktop'
+  'ai-dikte-settings.desktop'
+  'packaging/install-linux.sh'
+  'packaging/linux/ai-dikte.service'
   'LICENSE'
 )
 sha256sums=(
-  '6357d0742063338ac15802b0fed90918a4d3d7463e4353e8f9c3254b97892e7a'
-  '461cdf3e54e975a8b4f7e3abe1a819672f82c682c1189280c9bb7bb7f8a66581'
-  '98ec6c2e0d0d0c3704a417abfe22f12dc9ebd30cdd51d477d0f07d351c8fa1de'
-  '84646c35a5f9eefdfb08ff3c2d8e4d8b3468b3ba2245441a3850a37d922f889d'
-  '22484d5b1ee5f958af41c3d404efa9a87715fb23b90616827dffa37b14736ad2'
-  'a22f3502c74de8a00cf2193ae90c7e695ec2b5d4e16cde6a24c1ce4746af5ef9'
+  '6611e35b49c250cd69933f72f7efeffc43fa1b1b864a02dcafba38bc3753cbb9'
+  '621b65b767ac8bf98bc7e6b68eab47bef104df3141a1e1b1094e7557e49381a7'
+  '5a9ce8027186e1ea80c881ec71c7b7433bcec1f037cd81be42a882ece5923588'
+  '1027173fcec47fe37d61e2caf508fdcfceaf0128f6379ab4ffc61c3d9c52dcf2'
+  'fd64da2d87fd085cf1a1afd9ca07a4639482339f269b788a3c57484a8a0322fd'
+  '68baa379103ba3a952ff2942a96c0e8a56af0331e236c7f94567b6125c9efc0d'
+  'bbef59ce4e53586681f972e961b627f1ad6310b325f7c82c4c0742defd7f4ebe'
+  '401a8d11833fade9cd8e859a21f0c53d7f36eefc05e951bdc8d30a4ff367bf67'
+  'f500bec14f5466da20c57cad3409aad63d890496b01c4d2743f54ee30e39a9de'
+  'a7a2008aaee844d36a63aa82f6e346fea3115d7bbb47887dc95e97a3a1ff1711'
+  '57406fe721abd1b5e2ef4d61332cf5ad875e867a35738802268c4d6593d05d28'
+  '7d5bab6005c22a1d82bfdd561eb6ad883eb961fbd95898f187cbe8b00916232e'
+  '80d4bcb373c2d4af47cf864841d797921d4d910ab63323185ee96be2cb98f04b'
+  'b4d86b65a67c037a0e75695f452543b74b1686de89609d5b7ef2593ae163efe9'
+  '12e41b02a334417cd4022ea57171d09296818c1ae5a108908534c3d17b9d7fad'
+  '295b74098ad531efafe1c488900285676964d42ce7afe830520c669134f00d10'
+  '4af0149273ff20a14f46cb148facb9e630c9d942a49c622eeac85b8070d3ae35'
+  '8c0a12543246e06f13d91a55be32b964530136a8c222b88afa1372f26fd59095'
   '09df0758103426f42ce70aaf495f8740472a09ea73eb84ebfadeae0f2a7017ca'
+  '2ae98422757c1ec7225d311ee913eaf029f0f091399c58f8a76ccda2d1d51254'
   'e5fd2f221e661594b9b7c6ab9c1b0c0840b611fe9787cede188911a46f870a55'
   '4af2eea874ada16c8c13e7fb67e7c28c49ec76e8bac7e2997f78f94cc1041134'
+  'a22f3502c74de8a00cf2193ae90c7e695ec2b5d4e16cde6a24c1ce4746af5ef9'
+  'aa9d4b94d3822197e53bf34ae3a4c435cb20939f7a538ad313365b963edbbf2a'
+  'aa9ed30a060dfa449e27baa7b03924753146568ceb22f156d87b3f890ab05842'
   'f8719185a1f3d2a8ec0bf8507b1476e1a0f37cd10328402661f0cd2748d855d3'
 )
 
-package() {
-  install -Dm755 ai-dikte "$pkgdir/usr/bin/ai-dikte"
-  for module in ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py; do
-    install -Dm644 "$module" "$pkgdir/usr/lib/ai-dikte/$module"
+prepare() {
+  for file in "${source[@]}"; do
+    install -Dm644 "$srcdir/${file##*/}" "$srcdir/project/$file"
   done
-  install -Dm644 ai-dikte-settings.desktop "$pkgdir/usr/share/applications/ai-dikte-settings.desktop"
-  install -Dm644 ai-dikte.png "$pkgdir/usr/lib/ai-dikte/ai-dikte.png"
-  install -Dm644 ai-dikte.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/ai-dikte.png"
-  install -Dm755 ai-dikte-toggle "$pkgdir/usr/bin/ai-dikte-toggle"
-  ln -sf ai-dikte "$pkgdir/usr/bin/gemini-dikte"
-  ln -sf ai-dikte-toggle "$pkgdir/usr/bin/gemini-dikte-toggle"
-
-  install -Dm644 ai-dikte.desktop \
-    "$pkgdir/usr/share/applications/ai-dikte.desktop"
-  install -Dm644 ai-dikte.desktop \
-    "$pkgdir/usr/share/kglobalaccel/ai-dikte.desktop"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  cd "$srcdir/project/rust"
+  cargo fetch --locked
+}
+build() {
+  cd "$srcdir/project/rust"
+  cargo build --frozen --release
+}
+check() {
+  cd "$srcdir/project/rust"
+  cargo test --frozen
+  ./target/release/ai-dikte --self-test
+}
+package() {
+  cd "$srcdir/project"
+  DESTDIR="$pkgdir" AI_DIKTE_BINARY=rust/target/release/ai-dikte sh packaging/install-linux.sh
 }

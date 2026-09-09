@@ -29,7 +29,7 @@ pub struct Config {
     pub custom_vocabulary: Vec<String>,
     pub audio_cue: bool,
     pub notify_mode: Notifications,
-    pub input_device: Option<u32>,
+    pub input_device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 }

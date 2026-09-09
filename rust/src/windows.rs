@@ -343,7 +343,10 @@ pub fn daemon() -> Result<()> {
         tray.uID = 1;
         tray.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         tray.uCallbackMessage = TRAY_MESSAGE;
-        tray.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+        tray.hIcon = LoadIconW(instance, std::ptr::without_provenance::<u16>(1));
+        if tray.hIcon.is_null() {
+            bail!("Cannot load application icon");
+        }
         copy_wide(&mut tray.szTip, "AI Dikte — Ready (Win+Z)");
         if Shell_NotifyIconW(NIM_ADD, &tray) == 0 {
             bail!("Cannot create system tray icon");

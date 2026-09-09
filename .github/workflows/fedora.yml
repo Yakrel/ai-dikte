@@ -25,18 +25,19 @@ jobs:
       - name: Install RPM build tools and dependencies
         run: |
           dnf -y install rpm-build redhat-rpm-config dnf5-plugins \
-            curl-minimal tar gzip coreutils shadow-utils
+            curl-minimal tar gzip coreutils shadow-utils cargo rust
           dnf -y builddep packaging/fedora/ai-dikte.spec packaging/fedora/kwtype.spec
 
       - name: Prepare checked-out application and pinned backend sources
         run: |
           useradd --create-home builder
           mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-          tar -czf /tmp/rpmbuild/SOURCES/ai-dikte-0.4.0.tar.gz \
-            --transform 's,^,ai-dikte-0.4.0/,' \
-            ai-dikte ai-dikte-toggle \
-            ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py \
-            ai-dikte.png ai-dikte.desktop ai-dikte-settings.desktop LICENSE
+          tar -czf /tmp/rpmbuild/SOURCES/ai-dikte-0.5.0.tar.gz \
+            --exclude=rust/target --exclude=rust/.cargo --exclude=rust/settings.png \
+            --transform 's,^,ai-dikte-0.5.0/,' \
+            rust ai-dikte-toggle ai-dikte.png ai-dikte.ico ai-dikte.desktop ai-dikte-settings.desktop packaging LICENSE
+          cargo vendor --locked --manifest-path rust/Cargo.toml /tmp/vendor > /tmp/vendor-config.toml
+          tar -czf /tmp/rpmbuild/SOURCES/vendor.tar.gz -C /tmp vendor
           curl --fail --location --show-error \
             "https://github.com/Sporif/KWtype/archive/${KWTYPE_COMMIT}.tar.gz" \
             --output "/tmp/rpmbuild/SOURCES/${KWTYPE_COMMIT}.tar.gz"
@@ -51,7 +52,7 @@ jobs:
           runuser -u builder -- rpmbuild --define '_topdir /tmp/rpmbuild' \
             -bb /tmp/rpmbuild/SPECS/ai-dikte.spec
           mkdir -p dist
-          cp /tmp/rpmbuild/RPMS/noarch/ai-dikte-0.4.0-*.rpm \
+          cp /tmp/rpmbuild/RPMS/*/ai-dikte-0.5.0-*.rpm \
             /tmp/rpmbuild/RPMS/*/kwtype-0.1.0-*.rpm dist/
 
       - name: Install RPMs and smoke-test installed application

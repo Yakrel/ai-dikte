@@ -92,27 +92,17 @@ pub fn start(config: &Config) -> Result<Capture> {
 }
 #[cfg(windows)]
 pub fn start(config: &Config) -> Result<Capture> {
-    use anyhow::Context;
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use cpal::traits::{DeviceTrait, StreamTrait};
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
     let (tx, audio) = mpsc::channel(BUFFER_CHUNKS);
     let (stop, mut stopping) = oneshot::channel();
-    let index = config.input_device;
+    let selected = config.input_device.clone();
     // WASAPI stream is created, owned and destroyed on the same dedicated thread.
     let task = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let device = match index {
-            Some(index) => host
-                .input_devices()?
-                .nth(index as usize)
-                .context("Selected microphone no longer exists")?,
-            None => host
-                .default_input_device()
-                .context("No default microphone")?,
-        };
+        let device = select_device(selected.as_deref())?;
         let supported = device.default_input_config()?;
         let config: cpal::StreamConfig = supported.clone().into();
         let rate = config.sample_rate.0;
@@ -217,6 +207,36 @@ impl Pcm16 {
         bytes
     }
 }
+#[cfg(windows)]
+pub fn input_devices() -> Result<Vec<String>> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    cpal::default_host()
+        .input_devices()?
+        .map(|device| device.name().map_err(Into::into))
+        .collect()
+}
+#[cfg(windows)]
+pub fn select_device(name: Option<&str>) -> Result<cpal::Device> {
+    use anyhow::Context;
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let Some(name) = name else {
+        return host.default_input_device().context("No default microphone");
+    };
+    let mut matching = Vec::new();
+    for device in host.input_devices()? {
+        if device.name()? == name {
+            matching.push(device);
+        }
+    }
+    if matching.len() != 1 {
+        anyhow::bail!(
+            "Selected microphone is missing or its name is ambiguous; select it again in Settings"
+        );
+    }
+    Ok(matching.remove(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
