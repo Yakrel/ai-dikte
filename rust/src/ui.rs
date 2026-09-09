@@ -42,7 +42,7 @@ pub fn setup() -> Result<()> {
         "AI Dikte — Settings",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([660.0, 800.0])
+                .with_inner_size([700.0, 880.0])
                 .with_min_inner_size([460.0, 520.0])
                 .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(
                     "../../ai-dikte.png"
@@ -168,6 +168,21 @@ fn card(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(7.0);
 }
 
+fn writing_style(ui: &mut egui::Ui, selected: &mut Mode, choice: Mode) {
+    let (label, description) = match choice {
+        Mode::Smart => (
+            "Clean up speech (Smart)",
+            "Remove filler words and false starts; add punctuation and readable formatting.",
+        ),
+        Mode::Verbatim => (
+            "Word for word (Verbatim)",
+            "Keep the words you say, including repetitions and fillers such as ‘um’.",
+        ),
+    };
+    ui.radio_value(selected, choice, label);
+    hint(ui, description);
+}
+
 impl eframe::App for Settings {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         if let Some(rx) = &self.pending {
@@ -194,7 +209,11 @@ impl eframe::App for Settings {
             }
         }
         egui::TopBottomPanel::top("header")
-            .frame(egui::Frame::new().inner_margin(20))
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(18, 22, 29))
+                    .inner_margin(20),
+            )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("AI Dikte").size(27.0).strong());
@@ -208,7 +227,11 @@ impl eframe::App for Settings {
                 );
             });
         egui::TopBottomPanel::bottom("save_footer")
-            .frame(egui::Frame::new().inner_margin(16))
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(18, 22, 29))
+                    .inner_margin(16),
+            )
             .show(ctx, |ui| {
                 let pending = self.pending.is_some();
                 ui.horizontal(|ui| {
@@ -245,7 +268,7 @@ impl eframe::App for Settings {
                     );
                 }
             });
-        egui::CentralPanel::default().frame(egui::Frame::new().inner_margin(16)).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(18, 22, 29)).inner_margin(16)).show(ctx, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_enabled_ui(self.pending.is_none(), |ui| {
                     card(ui, "Connection", |ui| {
@@ -267,13 +290,17 @@ impl eframe::App for Settings {
                             ui.add_sized([100.0, 30.0], egui::TextEdit::singleline(&mut self.config.language));
                             hint(ui, "e.g. tr-TR or en-US");
                         });
-                        hint(ui, "The language you speak; this does not change the interface language.");
                         ui.add_space(4.0);
                         ui.label(RichText::new("Writing style").strong());
-                        ui.radio_value(&mut self.config.mode, Mode::Smart, "Clean up speech (Smart)");
-                        ui.indent("smart_hint", |ui| hint(ui, "Remove filler words and false starts; add punctuation and readable formatting."));
-                        ui.radio_value(&mut self.config.mode, Mode::Verbatim, "Word for word (Verbatim)");
-                        ui.indent("verbatim_hint", |ui| hint(ui, "Keep the words you say, including repetitions and fillers such as ‘um’."));
+                        if ui.available_width() >= 500.0 {
+                            ui.columns(2, |columns| {
+                                writing_style(&mut columns[0], &mut self.config.mode, Mode::Smart);
+                                writing_style(&mut columns[1], &mut self.config.mode, Mode::Verbatim);
+                            });
+                        } else {
+                            writing_style(ui, &mut self.config.mode, Mode::Smart);
+                            writing_style(ui, &mut self.config.mode, Mode::Verbatim);
+                        }
                         ui.add_space(5.0);
                         ui.label("Custom vocabulary");
                         hint(ui, "Names or technical terms Gemini should recognize. One entry per line.");
