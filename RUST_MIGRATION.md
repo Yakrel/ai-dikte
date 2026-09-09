@@ -2,6 +2,17 @@
 
 Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/paket yollarını Rust'a geçirmek. PR gerçek cihaz kabul testleri bitene kadar draft kalır.
 
+## Yan senaryo incelemesi — 9 Eylül
+- [x] Daemon çıkışını normal durdurmadan ayır: kayıt/finalizasyon iptalinde metin yazma, mikrofon görevini bekleyerek temizle
+- [x] Tamamlanmış kayıt görevinin iptalde ikinci kez poll edilmesini önle; kayıt sırasında ve sonrasında iptal testleri
+- [x] Windows komut kuyruğu doluyken çıkış isteğini kaybetme; worker join öncesinde Quit teslimini garantile
+- [x] Win önce bırakıldığında basılı Z'nin tekrarlarını yut; tuş dizisi regresyon testi ekle
+- [x] Aynı mesajdaki final + interim metinde geçici kuyruğu koru; eksik metin çıktısını engelleyen test
+- [x] Ayar dosyası yazılamazsa Windows anahtarını geri al; ilk anahtarın kaldırılması ve eski anahtarın korunması testleri
+- [x] Kaydetme sürerken ayar penceresinin kapanıp işlemi yarıda kesmesini engelle
+- [x] Rust 1.95 ile yerelde 28 test, Clippy (`-D warnings`), fmt ve uygulama self-test
+- [ ] Yeni değişikliklerin Windows/Linux ve Arch/Fedora/Nix CI kontrolleri (sonuçlar PR açıklamasında güncellenecek)
+
 ## Arayüz ve anahtar doğrulama düzeltmesi
 - [x] Tamamen İngilizce, bölümlere ayrılmış ayar ekranı ve okunabilir metin/boşluk düzeni
 - [x] Smart ve Verbatim için açıklamalar; arayüz dili ile konuşma dili ayrımı
@@ -45,7 +56,7 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [ ] Gerçek Gemini API oturumu (bu ortamda API anahtarı yok)
 
 ## Başarılı CI koşuları
-Doğrulanan son uygulama/paket commit'i: `fd21605efcf71cee85a7baa22cab0f8e71ea96d9`. Bu kayıt güncellemesi yalnız dokümantasyon değiştirir.
+Bu incelemeden önce doğrulanan uygulama/paket commit'i: `fd21605efcf71cee85a7baa22cab0f8e71ea96d9`. Aşağıdaki bağlantılar önceki sürümün kanıtlarıdır; yeni inceleme commit'inin sonuçları PR açıklamasında ayrıca izlenir.
 
 | Kontrol | Kanıt |
 | --- | --- |
@@ -73,7 +84,9 @@ Windows test paketi: [ai-dikte-windows ZIP](https://github.com/Yakrel/ai-dikte/a
 3. 44.1/48 kHz mikrofonlar, farklı odak uygulamaları, yükseltilmiş hedefte açık SendInput hatası.
 4. Bildirim açık/kapalı, ses açık/kapalı, Windows başlangıcı ve Explorer yeniden başlatıldıktan sonra tray.
 5. KDE yalnız kwtype, Hyprland yalnız wtype; başka backend'e geçilmemeli. İkinci daemon reddedilmeli, servis durduğunda mikrofon bırakılmalı.
-6. Yanlış anahtar, kota ve bağlantı kopması; anahtar/ses/metin günlüğe yazılmamalı.
+6. Kayıt ve finalizasyon sırasında tray Exit / servis stop: mikrofon bırakılmalı ve metin yazılmamalı. Normal Win+Z durdurma metni yazmaya devam etmeli.
+7. Ayarları kaydederken pencereyi kapatmayı dene: işlem bitmeden kapanmamalı. Yazılamayan config yolunda önceki anahtar korunmalı.
+8. Yanlış anahtar, kota ve bağlantı kopması; anahtar/ses/metin günlüğe yazılmamalı.
 
 ## Devam kuralı
 Aynı PR ve dalda çalış. Son commit'in CI koşularını kontrol et, başarısız adımların loglarını okuyup düzelt. İşaretleri yalnız doğrulama kanıtıyla güncelle; gerçek cihaz testlerini yapılmış gibi işaretleme. Kod değişince `packaging/update-arch-sources.sh` çalıştır. PR açıklamasını bu listeyle eşzamanlı güncelle. Yeni commit mevcut CI'ı iptal edebileceğinden, sonuç beklerken sadece durum notu için commit atma.

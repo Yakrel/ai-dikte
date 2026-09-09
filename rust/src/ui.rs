@@ -103,12 +103,41 @@ fn save_verified(
     }
     validate(&config, &key)?;
     #[cfg(windows)]
-    config::credentials::write(&key)?;
+    {
+        let previous = config::credentials::read_optional()?;
+        save_with_credential(
+            &config,
+            &key,
+            path,
+            previous.as_deref(),
+            config::credentials::restore,
+        )
+    }
     #[cfg(not(windows))]
     {
         config.api_key = Some(key);
+        config.save(path)
     }
-    config.save(path)
+}
+
+// Credential Manager and the JSON file are separate stores. If replacing the
+// settings fails, restore the prior key (or remove a newly created credential).
+#[cfg(any(windows, test))]
+fn save_with_credential(
+    config: &Config,
+    key: &str,
+    path: &Path,
+    previous: Option<&str>,
+    mut write_key: impl FnMut(Option<&str>) -> Result<()>,
+) -> Result<()> {
+    write_key(Some(key))?;
+    if let Err(error) = config.save(path) {
+        if let Err(rollback) = write_key(previous) {
+            return Err(error.context(format!("API key rollback also failed: {rollback:#}")));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 impl Settings {
@@ -207,6 +236,11 @@ impl eframe::App for Settings {
                     ctx.request_repaint_after(std::time::Duration::from_millis(100));
                 }
             }
+        }
+        if self.pending.is_some() && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.status =
+                "Please wait for the connection check and save to finish before closing.".into();
         }
         egui::TopBottomPanel::top("header")
             .frame(
@@ -368,6 +402,41 @@ pub fn text_window(title: &str, mut text: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn config_write_failure_restores_previous_credential_or_removes_new_one() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory cannot be atomically replaced with a config file.
+        for previous in [None, Some("old-key")] {
+            let mut saved = previous.map(str::to_owned);
+            let result =
+                save_with_credential(&Config::default(), "new-key", dir.path(), previous, |key| {
+                    saved = key.map(str::to_owned);
+                    Ok(())
+                });
+            assert!(result.is_err());
+            assert_eq!(saved.as_deref(), previous);
+        }
+    }
+    #[test]
+    fn credential_write_failure_does_not_replace_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let original = b"original settings";
+        std::fs::write(&path, original).unwrap();
+        assert!(
+            save_with_credential(
+                &Config::default(),
+                "new-key",
+                &path,
+                Some("old-key"),
+                |_| {
+                    anyhow::bail!("Credential store unavailable");
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
     #[test]
     fn unchanged_invalid_key_is_rechecked_and_does_not_overwrite_settings() {
         let dir = tempfile::tempdir().unwrap();

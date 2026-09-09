@@ -28,30 +28,38 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
             }
         };
         let (stop, stopped) = oneshot::channel();
-        let mut recording = Box::pin(session::run(config, stopped));
+        let (cancel, cancelled) = oneshot::channel();
+        let mut cancel = Some(cancel);
+        let mut recording = Box::pin(session::run_cancellable(config, stopped, cancelled));
         report("Recording — Win+Z to stop");
         let quitting = tokio::select! {
+            biased;
+            command = commands.recv() => matches!(command, None | Some(Command::Quit)),
             result = &mut recording => {
                 report(&match result { Ok(()) => "Ready".into(), Err(e) => format!("Error: {e:#}") });
                 continue;
             }
-            command = commands.recv() => matches!(command, None | Some(Command::Quit)),
         };
+        if quitting {
+            let _ = cancel.take().unwrap().send(());
+        }
         let _ = stop.send(());
         report("Finishing transcription…");
         loop {
             tokio::select! {
-                result = &mut recording => {
-                    report(&match result { Ok(()) => "Ready".into(), Err(e) => format!("Error: {e:#}") });
-                    break;
-                }
+                biased;
                 command = commands.recv(), if !quitting => {
                     if matches!(command, None | Some(Command::Quit)) {
+                        let _ = cancel.take().unwrap().send(());
                         // Keep capture cleanup owned by this future on exit.
                         let _ = recording.await;
                         return;
                     }
                     report("Still finishing; wait for Ready");
+                }
+                result = &mut recording => {
+                    report(&match result { Ok(()) => "Ready".into(), Err(e) => format!("Error: {e:#}") });
+                    break;
                 }
             }
         }

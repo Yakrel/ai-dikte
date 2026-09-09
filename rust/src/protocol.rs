@@ -57,7 +57,8 @@ impl Transcript {
             self.segments.push(final_text.to_owned());
             self.pending_interim = false;
             self.last_update = now;
-        } else if !interim.is_empty() {
+        }
+        if !interim.is_empty() {
             self.pending_interim = true;
             self.last_update = now;
         }
@@ -113,6 +114,26 @@ mod tests {
         t.receive(&final_message("iki"), Duration::from_secs(20))
             .unwrap();
         assert_eq!(t.finish().unwrap(), "Bir iki");
+    }
+    #[test]
+    fn final_and_interim_in_same_message_keep_the_tail_pending() {
+        let mut transcript = Transcript::default();
+        transcript
+            .receive(
+                &json!({"serverContent": {
+                    "inputTranscription": {"text": "Bir"},
+                    "interimInputTranscription": {"text": "iki"},
+                    "turnComplete": true
+                }}),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert!(!transcript.ready(Duration::from_secs(20), Duration::ZERO));
+        assert!(transcript.finish().is_err());
+        transcript
+            .receive(&final_message("iki"), Duration::from_secs(20))
+            .unwrap();
+        assert_eq!(transcript.finish().unwrap(), "Bir iki");
     }
     #[test]
     fn delayed_final_restarts_settle_window() {

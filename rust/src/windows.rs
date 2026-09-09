@@ -37,6 +37,27 @@ fn enqueue(command: Command) {
         let _ = tx.try_send(command);
     }
 }
+#[derive(Debug, PartialEq, Eq)]
+enum ChordAction {
+    Pass,
+    Consume,
+    Toggle,
+}
+fn chord_event(active: &mut bool, down: bool, up: bool, win: bool) -> ChordAction {
+    if down && *active {
+        // Keep swallowing repeats even when Win was released before Z.
+        ChordAction::Consume
+    } else if down && win {
+        *active = true;
+        ChordAction::Toggle
+    } else if up && *active {
+        *active = false;
+        ChordAction::Consume
+    } else {
+        ChordAction::Pass
+    }
+}
+
 unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
         if code >= 0 {
@@ -46,27 +67,29 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let up = wp == WM_KEYUP as usize || wp == WM_SYSKEYUP as usize;
                 let win =
                     GetAsyncKeyState(VK_LWIN as i32) < 0 || GetAsyncKeyState(VK_RWIN as i32) < 0;
-                if down && win {
-                    if !CHORD.replace(true) {
-                        // Match the existing app's Start-menu suppression.
-                        let mut events: [INPUT; 2] = std::mem::zeroed();
-                        for (index, event) in events.iter_mut().enumerate() {
-                            event.r#type = INPUT_KEYBOARD;
-                            event.Anonymous.ki = KEYBDINPUT {
-                                wVk: 0xFC,
-                                wScan: 0,
-                                dwFlags: if index == 0 { 0 } else { KEYEVENTF_KEYUP },
-                                time: 0,
-                                dwExtraInfo: 0,
-                            };
-                        }
-                        SendInput(2, events.as_ptr(), std::mem::size_of::<INPUT>() as i32);
-                        enqueue(Command::Toggle);
+                let action = CHORD.with(|chord| {
+                    let mut active = chord.get();
+                    let action = chord_event(&mut active, down, up, win);
+                    chord.set(active);
+                    action
+                });
+                if action == ChordAction::Toggle {
+                    // Match the existing app's Start-menu suppression.
+                    let mut events: [INPUT; 2] = std::mem::zeroed();
+                    for (index, event) in events.iter_mut().enumerate() {
+                        event.r#type = INPUT_KEYBOARD;
+                        event.Anonymous.ki = KEYBDINPUT {
+                            wVk: 0xFC,
+                            wScan: 0,
+                            dwFlags: if index == 0 { 0 } else { KEYEVENTF_KEYUP },
+                            time: 0,
+                            dwExtraInfo: 0,
+                        };
                     }
-                    return 1;
+                    SendInput(2, events.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+                    enqueue(Command::Toggle);
                 }
-                // Consume Z release even if Win was released first.
-                if up && CHORD.replace(false) {
+                if action != ChordAction::Pass {
                     return 1;
                 }
             }
@@ -379,7 +402,11 @@ pub fn daemon() -> Result<()> {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        enqueue(Command::Quit);
+        // The bounded hotkey queue may be full. Shutdown must not be lost,
+        // otherwise joining the worker can wait forever.
+        if let Some(tx) = COMMANDS.get() {
+            let _ = tx.blocking_send(Command::Quit);
+        }
         worker
             .join()
             .map_err(|_| anyhow::anyhow!("Session worker panicked"))?;
@@ -446,5 +473,41 @@ pub fn startup_enabled() -> Result<bool> {
         ERROR_SUCCESS => Ok(true),
         ERROR_FILE_NOT_FOUND => Ok(false),
         _ => bail!("Cannot read startup setting ({result})"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn win_released_before_z_does_not_leak_repeat_or_toggle_twice() {
+        let mut active = false;
+        assert_eq!(
+            chord_event(&mut active, true, false, true),
+            ChordAction::Toggle
+        );
+        for win in [true, false, false] {
+            assert_eq!(
+                chord_event(&mut active, true, false, win),
+                ChordAction::Consume
+            );
+        }
+        assert_eq!(
+            chord_event(&mut active, false, true, false),
+            ChordAction::Consume
+        );
+        assert_eq!(
+            chord_event(&mut active, true, false, false),
+            ChordAction::Pass
+        );
+        assert_eq!(
+            chord_event(&mut active, false, true, false),
+            ChordAction::Pass
+        );
+        assert_eq!(
+            chord_event(&mut active, true, false, true),
+            ChordAction::Toggle
+        );
     }
 }

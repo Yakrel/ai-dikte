@@ -138,10 +138,16 @@ pub mod credentials {
         "Yakrel/AI-Dikte/GoogleAI\0".encode_utf16().collect()
     }
     pub fn read() -> Result<String> {
+        read_optional()?.ok_or_else(|| anyhow::anyhow!("API key missing; run setup first"))
+    }
+    pub fn read_optional() -> Result<Option<String>> {
         let target = target();
         let mut cred = std::ptr::null_mut();
         unsafe {
             if CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut cred) == 0 {
+                if GetLastError() == windows_sys::Win32::Foundation::ERROR_NOT_FOUND {
+                    return Ok(None);
+                }
                 bail!(
                     "Cannot read API key from Credential Manager (error {})",
                     GetLastError()
@@ -157,8 +163,21 @@ pub mod credentials {
             )
             .to_vec();
             CredFree(cred.cast());
-            String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("Invalid credential encoding"))
+            String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| anyhow::anyhow!("Invalid credential encoding"))
         }
+    }
+    pub fn restore(key: Option<&str>) -> Result<()> {
+        if let Some(key) = key {
+            return write(key);
+        }
+        if unsafe { CredDeleteW(target().as_ptr(), CRED_TYPE_GENERIC, 0) } == 0
+            && unsafe { GetLastError() } != windows_sys::Win32::Foundation::ERROR_NOT_FOUND
+        {
+            bail!("Cannot remove API key from Credential Manager");
+        }
+        Ok(())
     }
     pub fn write(key: &str) -> Result<()> {
         let mut target = target();
