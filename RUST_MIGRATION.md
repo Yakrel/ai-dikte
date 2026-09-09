@@ -2,6 +2,16 @@
 
 Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/paket yollarını Rust'a geçirmek. PR gerçek cihaz kabul testleri bitene kadar draft kalır.
 
+## Arayüz ve anahtar doğrulama düzeltmesi
+- [x] Tamamen İngilizce, bölümlere ayrılmış ayar ekranı ve okunabilir metin/boşluk düzeni
+- [x] Smart ve Verbatim için açıklamalar; arayüz dili ile konuşma dili ayrımı
+- [x] Sabit kaydetme alanı, görünür bağlantı durumu ve hata mesajı
+- [x] Her kaydetmede Gemini doğrulaması; değişmeyen anahtarda doğrulamayı atlama kaldırıldı
+- [x] Başarısız doğrulamada eski ayarları koruma ve ilk kurulumda dosya oluşturmama testleri
+- [x] Geçersiz setupComplete yanıtı başarı sayılmıyor
+- [x] Yerelde 23 test; `12345` ile canlı bağlantı denemesi başarısız oldu
+- [ ] Yeni arayüz ekran görüntüsü ve son Windows/Linux CI kontrolleri
+
 ## Tamamlanan uygulama işleri
 - [x] Gemini Live wire sözleşmesi, final/interim ayrımı, tekrar eden final segmentlerini koruma
 - [x] Atomik ayar dosyası; Windows Credential Manager, Linux 0600 izin

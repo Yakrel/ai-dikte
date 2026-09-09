@@ -14,6 +14,8 @@ Windows ve Linux Wayland için Rust ile yazılmış Gemini sesli yazma uygulamas
 - Kayıt/bağlantı/çıktı hatalarında açık hata; otomatik alternatif backend veya Python kurulumu yok.
 - Sesli bildirim varsayılan kapalı. Bildirim ve ses tercihleri bağımsızdır.
 
+Arayüz İngilizcedir; **Spoken language** yalnız konuşma dilini belirler. **Clean up speech (Smart)** dolgu sözcüklerini temizleyip metni düzenler; **Word for word (Verbatim)** tekrarlar ve dolgu sözcükleri dahil söylenenleri korur. [Gemini mod açıklamaları](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
+
 ## Windows
 
 Rust sürümü main'e alındıktan sonra PowerShell'de:
@@ -99,7 +101,7 @@ NixOS yapılandırmanızda seçilen paketi `environment.systemPackages` ve `syst
 
 Ayarlar: Windows `%APPDATA%\ai-dikte\config.json`; Linux `$XDG_CONFIG_HOME/ai-dikte/config.json` (varsayılan `~/.config/ai-dikte/config.json`). `session.log` aynı dizindedir; ses ve transkript kaydedilmez. Linux kontrol soketi `$XDG_RUNTIME_DIR/ai-dikte-rust/control.sock` içindedir.
 
-`doctor` bağlantı veya mikrofon kaydı testi yapmaz. `check-config` API anahtarının bulunmasını ve yerel gereksinimleri kontrol eder; Gemini doğrulaması API ayarlarını kaydederken yapılır. Windows yükseltilmiş uygulamalara yazmayı engelleyebilir; SendInput hatası açıkça gösterilir.
+`doctor` bağlantı veya mikrofon kaydı testi yapmaz. `check-config` API anahtarının bulunmasını ve yerel gereksinimleri kontrol eder; Gemini doğrulaması her **Test connection & save** işleminde yapılır; bağlantı veya doğrulama başarısızsa ayarlar kaydedilmez. Windows yükseltilmiş uygulamalara yazmayı engelleyebilir; SendInput hatası açıkça gösterilir.
 
 ## Geliştirme
 

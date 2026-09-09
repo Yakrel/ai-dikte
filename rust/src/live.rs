@@ -57,13 +57,22 @@ async fn connect_at(config: &Config, key: &str, endpoint: &str) -> Result<Socket
     let (mut socket, _) = timeout(IO_TIMEOUT, tokio_tungstenite::connect_async(url.as_str()))
         .await
         .context("Gemini connection timed out")?
-        .map_err(|_| anyhow::anyhow!("Cannot connect to Gemini; check network and API access"))?;
+        .map_err(|error| match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => anyhow::anyhow!(
+                "Gemini rejected the connection (HTTP {}). Check your API key and model access.",
+                response.status().as_u16()
+            ),
+            _ => anyhow::anyhow!("Cannot connect to Gemini; check network and API access"),
+        })?;
     send(&mut socket, protocol::setup(config)).await?;
     timeout(IO_TIMEOUT, async {
         loop {
             let message = receive(&mut socket).await?;
             protocol::check_error(&message)?;
-            if message.get("setupComplete").is_some() {
+            if let Some(acknowledgement) = message.get("setupComplete") {
+                if !acknowledgement.is_object() {
+                    bail!("Gemini returned an invalid setup acknowledgement");
+                }
                 return Ok::<_, anyhow::Error>(());
             }
         }
@@ -146,6 +155,16 @@ mod tests {
                 setup["setup"]["model"],
                 format!("models/{}", protocol::MODEL)
             );
+            if outcome == "bad_ack" {
+                socket
+                    .send(Message::Text(
+                        json!({"setupComplete":null}).to_string().into(),
+                    ))
+                    .await
+                    .unwrap();
+                let _ = socket.close(None).await;
+                return;
+            }
             if outcome == "auth" {
                 socket
                     .send(Message::Text(
@@ -216,6 +235,16 @@ mod tests {
     #[tokio::test]
     async fn interim_disconnect_never_returns_committed_prefix() {
         assert!(exercise("interim").await.is_err());
+    }
+    #[tokio::test]
+    async fn malformed_setup_acknowledgement_is_not_validation_success() {
+        let (url, server) = mock("bad_ack").await;
+        assert!(
+            connect_at(&Config::default(), "test-only", &url)
+                .await
+                .is_err()
+        );
+        server.await.unwrap();
     }
     #[tokio::test]
     async fn authentication_error_does_not_expose_key() {
