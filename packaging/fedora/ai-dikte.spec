@@ -7,7 +7,7 @@ URL:            https://github.com/Yakrel/ai-dikte
 Source0:        %{name}-%{version}.tar.gz
 # Dependency sources are fetched with cargo --locked before rpmbuild and built offline.
 Source1:        vendor.tar.gz
-BuildRequires:  rust >= 1.98
+BuildRequires:  rust >= 1.95
 BuildRequires:  cargo
 BuildRequires:  gcc
 BuildRequires:  pkgconf-pkg-config

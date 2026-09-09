@@ -6,11 +6,11 @@ arch=('x86_64')
 url='https://github.com/Yakrel/ai-dikte'
 license=('MIT')
 depends=('libnotify' 'pipewire-audio' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libglvnd' 'libx11' 'libxcursor' 'libxi' 'libxrandr')
-makedepends=('rust>=1.98' 'cargo' 'pkgconf')
+makedepends=('rust>=1.95' 'cargo' 'pkgconf')
 optdepends=('wtype: Hyprland text injection' 'ai-dikte-kwtype: KDE Plasma text injection')
 # Local source files and SHA256 values are generated below; no network source or SKIP hashes.
 # BEGIN GENERATED SOURCES
-source=(
+_sources=(
   'rust/Cargo.toml'
   'rust/Cargo.lock'
   'rust/build.rs'
@@ -38,8 +38,15 @@ source=(
   'packaging/linux/ai-dikte.service'
   'LICENSE'
 )
+# makepkg resolves local sources by basename. Explicit file URLs retain the
+# checkout path for files in subdirectories while checksums remain mandatory.
+DLAGENTS+=('file::/usr/bin/curl -qg -o %o %u')
+source=()
+for file in "${_sources[@]}"; do
+  source+=("${file##*/}::file://$startdir/$file")
+done
 sha256sums=(
-  '6611e35b49c250cd69933f72f7efeffc43fa1b1b864a02dcafba38bc3753cbb9'
+  '33adfc7da3a97c1808104fe35e15836db8e69261d27b1c6a902295298222435e'
   '621b65b767ac8bf98bc7e6b68eab47bef104df3141a1e1b1094e7557e49381a7'
   '5a9ce8027186e1ea80c881ec71c7b7433bcec1f037cd81be42a882ece5923588'
   '1027173fcec47fe37d61e2caf508fdcfceaf0128f6379ab4ffc61c3d9c52dcf2'
@@ -68,7 +75,7 @@ sha256sums=(
 )
 
 prepare() {
-  for file in "${source[@]}"; do
+  for file in "${_sources[@]}"; do
     install -Dm644 "$srcdir/${file##*/}" "$srcdir/project/$file"
   done
   cd "$srcdir/project/rust"

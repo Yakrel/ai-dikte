@@ -7,9 +7,18 @@ sources=(rust/Cargo.toml rust/Cargo.lock rust/build.rs "${sources[@]}" ai-dikte.
 sed '/^# BEGIN GENERATED SOURCES/,$d' PKGBUILD > PKGBUILD.tmp
 {
   echo '# BEGIN GENERATED SOURCES'
-  echo 'source=('
+  echo '_sources=('
   printf "  '%s'\n" "${sources[@]}"
   echo ')'
+  cat <<'SOURCES'
+# makepkg resolves local sources by basename. Explicit file URLs retain the
+# checkout path for files in subdirectories while checksums remain mandatory.
+DLAGENTS+=('file::/usr/bin/curl -qg -o %o %u')
+source=()
+for file in "${_sources[@]}"; do
+  source+=("${file##*/}::file://$startdir/$file")
+done
+SOURCES
   echo 'sha256sums=('
   for file in "${sources[@]}"; do
     sum=$(sha256sum "$file")
@@ -19,7 +28,7 @@ sed '/^# BEGIN GENERATED SOURCES/,$d' PKGBUILD > PKGBUILD.tmp
   cat <<'BUILD'
 
 prepare() {
-  for file in "${source[@]}"; do
+  for file in "${_sources[@]}"; do
     install -Dm644 "$srcdir/${file##*/}" "$srcdir/project/$file"
   done
   cd "$srcdir/project/rust"

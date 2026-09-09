@@ -25,8 +25,8 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [x] Yerelde 20 Rust testi (4 localhost WebSocket testi, 3 oturum yaşam döngüsü testi dahil)
 - [x] Linux debug build ve `--self-test`
 - [x] Shell/PKGBUILD sözdizimi ve diff whitespace kontrolü
-- [ ] Son commit Windows native MSVC derleme, test, installer testleri ve EXE smoke testi
-- [ ] Son commit Linux native derleme ve ayar ekranı render/görsel kontrolü
+- [x] Windows native MSVC derleme, test, installer testleri ve EXE smoke testi (`82d0167`)
+- [x] Linux native derleme ve ayar ekranı render/görsel kontrolü (`82d0167`)
 - [ ] Arch paket kurulum testi
 - [ ] Fedora RPM derleme ve kurulum testi
 - [ ] Nix KDE/Hyprland paket derlemeleri
@@ -35,8 +35,10 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [ ] Gerçek Gemini API oturumu (bu ortamda API anahtarı yok)
 
 ## Mevcut doğrulama notları
-- Önceki checkpoint'te Linux GUI smoke testi eksik `libxkbcommon-x11.so` nedeniyle kırılmıştı; CI bağımlılığı eklendi.
-- Native Windows ve Linux derlemesi ilk checkpoint'te başarılıydı. Yeni paketleme/arayüz kodu için son commit CI sonucu esas alınmalı.
+- Linux GUI için eksik XKB X11 kütüphanesi eklendi; CI ekran görüntüsü alındı ve görsel olarak kontrol edildi.
+- `82d0167`: Windows release EXE, checksum, installer hata testleri ve self-test geçti; Linux release ve GUI smoke testi geçti.
+- Nix sabitlenmiş Rust 1.95 kullanıyor. Minimum sürüm 1.95 olarak düzeltildi; yerelde bu sürümle 20 test geçti.
+- Arch makepkg alt klasör kaynaklarını basename ile arıyor. Checksum doğrulamasını koruyarak açık yerel file URL kaynaklarına geçildi; paket CI sonucu bekleniyor.
 - Python dosyaları artık bu dalda yok; main henüz değiştirilmedi ve PR merge edilmedi. Test için Build Windows Executable koşusundaki `ai-dikte-windows` artifact'ini kullanın. `main` installer'ı merge öncesi eski sürümü indirir.
 - Nix sandbox socket açmaya izin vermediğinden yalnız `live::tests` orada atlanır; localhost wire testleri Linux/Windows native CI'da çalışır.
 

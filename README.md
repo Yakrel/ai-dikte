@@ -103,7 +103,7 @@ Ayarlar: Windows `%APPDATA%\ai-dikte\config.json`; Linux `$XDG_CONFIG_HOME/ai-di
 
 ## Geliştirme
 
-Rust 1.98+ ve platform derleme araçları gerekir. Windows ikon kaynağı için Windows SDK gerekir. Linux GUI kütüphaneleri: Wayland, XKB, X11 ve OpenGL/EGL.
+Rust 1.95+ ve platform derleme araçları gerekir. Windows ikon kaynağı için Windows SDK gerekir. Linux GUI kütüphaneleri: Wayland, XKB, X11 ve OpenGL/EGL.
 
 ```sh
 cd rust
