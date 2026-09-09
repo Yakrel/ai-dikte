@@ -22,7 +22,9 @@ Requires:       libXi
 Requires:       libXrandr
 Requires:       libglvnd-egl
 Requires:       libglvnd-glx
-Requires:       wayland-libs
+Requires:       libwayland-client
+Requires:       libwayland-cursor
+Requires:       libwayland-egl
 Requires:       hicolor-icon-theme
 
 %description
@@ -47,7 +49,7 @@ cargo build --frozen --release
 
 %check
 cd rust
-cargo test --frozen --lib -- --skip live::tests
+cargo test --frozen --release --lib -- --skip live::tests
 ./target/release/ai-dikte --self-test
 
 %install

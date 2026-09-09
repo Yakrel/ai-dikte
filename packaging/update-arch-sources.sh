@@ -40,7 +40,7 @@ build() {
 }
 check() {
   cd "$srcdir/project/rust"
-  cargo test --frozen
+  cargo test --frozen --release
   ./target/release/ai-dikte --self-test
 }
 package() {

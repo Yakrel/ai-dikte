@@ -46,7 +46,7 @@ for file in "${_sources[@]}"; do
   source+=("${file##*/}::file://$startdir/$file")
 done
 sha256sums=(
-  '33adfc7da3a97c1808104fe35e15836db8e69261d27b1c6a902295298222435e'
+  'e13976c268392329b9840529c8f222bf9e01e0569a190a08fca4958113964e06'
   '621b65b767ac8bf98bc7e6b68eab47bef104df3141a1e1b1094e7557e49381a7'
   '5a9ce8027186e1ea80c881ec71c7b7433bcec1f037cd81be42a882ece5923588'
   '1027173fcec47fe37d61e2caf508fdcfceaf0128f6379ab4ffc61c3d9c52dcf2'
@@ -87,7 +87,7 @@ build() {
 }
 check() {
   cd "$srcdir/project/rust"
-  cargo test --frozen
+  cargo test --frozen --release
   ./target/release/ai-dikte --self-test
 }
 package() {

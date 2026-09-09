@@ -25,11 +25,11 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [x] Yerelde 20 Rust testi (4 localhost WebSocket testi, 3 oturum yaşam döngüsü testi dahil)
 - [x] Linux debug build ve `--self-test`
 - [x] Shell/PKGBUILD sözdizimi ve diff whitespace kontrolü
-- [x] Windows native MSVC derleme, test, installer testleri ve EXE smoke testi (`82d0167`)
-- [x] Linux native derleme ve ayar ekranı render/görsel kontrolü (`82d0167`)
+- [x] Windows native MSVC derleme, test, installer testleri ve EXE smoke testi (`99fda5f`)
+- [x] Linux native derleme ve ayar ekranı render/görsel kontrolü (`99fda5f`)
 - [ ] Arch paket kurulum testi
 - [ ] Fedora RPM derleme ve kurulum testi
-- [ ] Nix KDE/Hyprland paket derlemeleri
+- [x] Nix KDE/Hyprland paket derlemeleri ve kurulu uygulama self-test (`99fda5f`)
 - [ ] Gerçek Windows mikrofon/Win+Z/SendInput/tray/OSD testi
 - [ ] Gerçek Linux KDE/Hyprland Wayland uçtan uca test
 - [ ] Gerçek Gemini API oturumu (bu ortamda API anahtarı yok)
@@ -38,7 +38,8 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - Linux GUI için eksik XKB X11 kütüphanesi eklendi; CI ekran görüntüsü alındı ve görsel olarak kontrol edildi.
 - `82d0167`: Windows release EXE, checksum, installer hata testleri ve self-test geçti; Linux release ve GUI smoke testi geçti.
 - Nix sabitlenmiş Rust 1.95 kullanıyor. Minimum sürüm 1.95 olarak düzeltildi; yerelde bu sürümle 20 test geçti.
-- Arch makepkg alt klasör kaynaklarını basename ile arıyor. Checksum doğrulamasını koruyarak açık yerel file URL kaynaklarına geçildi; paket CI sonucu bekleniyor.
+- Arch makepkg alt klasör kaynaklarını basename ile arıyor. Checksum doğrulamasını koruyarak açık yerel file URL kaynaklarına geçildi; kaynak checksum doğrulaması CI'da geçti. Üst klasördeki geçici Cargo.toml ile çakışmayı önlemek için bağımsız `[workspace]` eklendi.
+- Fedora RPM derlemesi, 16 paket testi ve self-test geçti; kurulumdaki yanlış `wayland-libs` bağımlılığı Fedora'nın `libwayland-client/cursor/egl` paketleriyle düzeltildi. Arch/Fedora kurulum CI sonuçları bekleniyor.
 - Python dosyaları artık bu dalda yok; main henüz değiştirilmedi ve PR merge edilmedi. Test için Build Windows Executable koşusundaki `ai-dikte-windows` artifact'ini kullanın. `main` installer'ı merge öncesi eski sürümü indirir.
 - Nix sandbox socket açmaya izin vermediğinden yalnız `live::tests` orada atlanır; localhost wire testleri Linux/Windows native CI'da çalışır.
 
