@@ -25,21 +25,34 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [x] Yerelde 20 Rust testi (4 localhost WebSocket testi, 3 oturum yaşam döngüsü testi dahil)
 - [x] Linux debug build ve `--self-test`
 - [x] Shell/PKGBUILD sözdizimi ve diff whitespace kontrolü
-- [x] Windows native MSVC derleme, test, installer testleri ve EXE smoke testi (`99fda5f`)
-- [x] Linux native derleme ve ayar ekranı render/görsel kontrolü (`99fda5f`)
-- [ ] Arch paket kurulum testi
-- [ ] Fedora RPM derleme ve kurulum testi
-- [x] Nix KDE/Hyprland paket derlemeleri ve kurulu uygulama self-test (`99fda5f`)
+- [x] Windows native MSVC derleme, test, installer testleri ve EXE smoke testi (`0d646bd`)
+- [x] Linux native derleme ve ayar ekranı render/görsel kontrolü (`0d646bd`)
+- [x] Arch paket derleme, test, kurulum ve self-test (`0d646bd`)
+- [x] Fedora RPM derleme, test, kurulum ve self-test (`0d646bd`)
+- [x] Nix KDE/Hyprland paket derlemeleri ve kurulu uygulama self-test (`0d646bd`)
 - [ ] Gerçek Windows mikrofon/Win+Z/SendInput/tray/OSD testi
 - [ ] Gerçek Linux KDE/Hyprland Wayland uçtan uca test
 - [ ] Gerçek Gemini API oturumu (bu ortamda API anahtarı yok)
+
+## Başarılı CI koşuları
+Doğrulanan son uygulama/paket commit'i: `0d646bd8694b8f3a0c9e3cccbac10cb4bab18952`. Bu kayıt güncellemesi yalnız dokümantasyon değiştirir.
+
+| Kontrol | Kanıt |
+| --- | --- |
+| Windows EXE, installer testleri, checksum ve self-test | [Başarılı koşu](https://github.com/Yakrel/ai-dikte/actions/runs/34352606089) |
+| Linux/Windows native lint, test, build; Linux GUI render | [Başarılı koşu](https://github.com/Yakrel/ai-dikte/actions/runs/34352606086) |
+| Arch uygulama ve KWtype paketleri | [Başarılı koşu](https://github.com/Yakrel/ai-dikte/actions/runs/34352606337) |
+| Fedora uygulama ve KWtype RPM'leri | [Başarılı koşu](https://github.com/Yakrel/ai-dikte/actions/runs/34352606122) |
+| Nix KDE ve Hyprland paketleri | [Başarılı koşu](https://github.com/Yakrel/ai-dikte/actions/runs/34352606129) |
+
+Windows test paketi: [ai-dikte-windows ZIP](https://github.com/Yakrel/ai-dikte/actions/runs/34352606089/artifacts/10104544584). ZIP içindeki EXE ve SHA256 dosyasını aynı klasöre çıkarın; PR dalındaki `install.ps1 -ArtifactDirectory <klasör>` ile kurun. Artifact saklama süresi 7 gün; daha sonra Build Windows Executable workflow'u `rewrite/rust` dalında yeniden çalıştırılabilir.
 
 ## Mevcut doğrulama notları
 - Linux GUI için eksik XKB X11 kütüphanesi eklendi; CI ekran görüntüsü alındı ve görsel olarak kontrol edildi.
 - `82d0167`: Windows release EXE, checksum, installer hata testleri ve self-test geçti; Linux release ve GUI smoke testi geçti.
 - Nix sabitlenmiş Rust 1.95 kullanıyor. Minimum sürüm 1.95 olarak düzeltildi; yerelde bu sürümle 20 test geçti.
 - Arch makepkg alt klasör kaynaklarını basename ile arıyor. Checksum doğrulamasını koruyarak açık yerel file URL kaynaklarına geçildi; kaynak checksum doğrulaması CI'da geçti. Üst klasördeki geçici Cargo.toml ile çakışmayı önlemek için bağımsız `[workspace]` eklendi.
-- Fedora RPM derlemesi, 16 paket testi ve self-test geçti; kurulumdaki yanlış `wayland-libs` bağımlılığı Fedora'nın `libwayland-client/cursor/egl` paketleriyle düzeltildi. Arch/Fedora kurulum CI sonuçları bekleniyor.
+- Fedora RPM derlemesi, 16 paket testi ve self-test geçti; kurulumdaki yanlış `wayland-libs` bağımlılığı Fedora'nın `libwayland-client/cursor/egl` paketleriyle düzeltildi. Arch ve Fedora kurulum CI kontrolleri geçti.
 - Python dosyaları artık bu dalda yok; main henüz değiştirilmedi ve PR merge edilmedi. Test için Build Windows Executable koşusundaki `ai-dikte-windows` artifact'ini kullanın. `main` installer'ı merge öncesi eski sürümü indirir.
 - Nix sandbox socket açmaya izin vermediğinden yalnız `live::tests` orada atlanır; localhost wire testleri Linux/Windows native CI'da çalışır.
 
