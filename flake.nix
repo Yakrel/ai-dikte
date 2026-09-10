@@ -47,68 +47,48 @@
         };
       };
 
-      python = pkgs.python3.withPackages (ps: [ ps.websockets ps.tkinter ]);
       source = lib.fileset.toSource {
         root = ./.;
         fileset = lib.fileset.unions [
-          ./ai_dikte.py
-          ./ai_dikte_core.py
-          ./ai_dikte_config.py
-          ./ai_dikte_ui.py
-          ./ai-dikte-toggle
-          ./ai-dikte.desktop
-          ./ai-dikte-settings.desktop
-          ./ai-dikte.png
-          ./LICENSE
+          ./rust/Cargo.toml ./rust/Cargo.lock ./rust/build.rs ./rust/src
+          ./ai-dikte-toggle ./ai-dikte.desktop ./ai-dikte-settings.desktop
+          ./ai-dikte.png ./ai-dikte.ico ./LICENSE ./packaging/linux
         ];
       };
-
-      mkAiDikte = desktop: typingBackend: pkgs.stdenvNoCC.mkDerivation {
+      mkAiDikte = desktop: typingBackend: pkgs.rustPlatform.buildRustPackage {
         pname = "ai-dikte-${desktop}";
-        version = "0.4.0";
+        version = "0.5.0";
         src = source;
-        nativeBuildInputs = [ pkgs.makeWrapper ];
-        dontBuild = true;
-        strictDeps = true;
-
-        installPhase = ''
-          runHook preInstall
-
-          for module in ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py; do
-            install -Dm644 "$module" "$out/lib/ai-dikte/$module"
-          done
-          install -Dm644 ai-dikte.png "$out/lib/ai-dikte/ai-dikte.png"
-          install -Dm644 ai-dikte.png "$out/share/icons/hicolor/256x256/apps/ai-dikte.png"
-          install -Dm644 LICENSE "$out/share/licenses/ai-dikte/LICENSE"
-
-          # Generate the relocatable launcher's Nix equivalent with a fixed interpreter.
-          # Keep host PATH after packaged tools so session-provided hyprctl stays available.
-          makeWrapper ${python}/bin/python3 "$out/bin/ai-dikte" \
-            --add-flags "$out/lib/ai-dikte/ai_dikte.py" \
-            --prefix PATH : ${lib.makeBinPath [ typingBackend pkgs.pipewire pkgs.libnotify python ]} \
-            --set PYTHONNOUSERSITE 1 \
-            --unset PYTHONPATH \
-            --unset PYTHONHOME
+        cargoRoot = "rust";
+        buildAndTestSubdir = "rust";
+        cargoLock.lockFile = ./rust/Cargo.lock;
+        nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
+        # Nix builds disallow socket creation; the dedicated native CI runs the
+        # same localhost WebSocket tests without this sandbox restriction.
+        checkFlags = [ "--skip" "live::tests" ];
+        postInstall = ''
+          wrapProgram "$out/bin/ai-dikte" \
+            --prefix PATH : ${lib.makeBinPath [ typingBackend pkgs.pipewire pkgs.libnotify pkgs.systemd ]}
           install -Dm755 ai-dikte-toggle "$out/bin/ai-dikte-toggle"
           substituteInPlace "$out/bin/ai-dikte-toggle" \
             --replace-fail 'exec ai-dikte toggle' "exec $out/bin/ai-dikte toggle"
-
+          install -Dm644 ai-dikte.png "$out/share/icons/hicolor/256x256/apps/ai-dikte.png"
+          install -Dm644 LICENSE "$out/share/licenses/ai-dikte/LICENSE"
           install -Dm644 ai-dikte.desktop "$out/share/applications/ai-dikte.desktop"
           install -Dm644 ai-dikte-settings.desktop "$out/share/applications/ai-dikte-settings.desktop"
           substituteInPlace "$out/share/applications/ai-dikte.desktop" \
             --replace-fail 'Exec=ai-dikte-toggle' "Exec=$out/bin/ai-dikte-toggle"
           substituteInPlace "$out/share/applications/ai-dikte-settings.desktop" \
             --replace-fail 'Exec=ai-dikte' "Exec=$out/bin/ai-dikte"
+          install -Dm644 packaging/linux/ai-dikte.service "$out/lib/systemd/user/ai-dikte.service"
+          substituteInPlace "$out/lib/systemd/user/ai-dikte.service" \
+            --replace-fail '/usr/bin/ai-dikte' "$out/bin/ai-dikte"
           ${lib.optionalString (desktop == "kde") ''
-            install -Dm644 "$out/share/applications/ai-dikte.desktop" \
-              "$out/share/kglobalaccel/ai-dikte.desktop"
+            install -Dm644 "$out/share/applications/ai-dikte.desktop" "$out/share/kglobalaccel/ai-dikte.desktop"
           ''}
-
-          runHook postInstall
         '';
-
         meta = {
-          description = "Minimal Wayland dictation for ${desktop} using Gemini Transcribe Live";
+          description = "Rust voice dictation for ${desktop} using Gemini Live";
           homepage = "https://github.com/Yakrel/ai-dikte";
           license = lib.licenses.mit;
           platforms = [ system ];

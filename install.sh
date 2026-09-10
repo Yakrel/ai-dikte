@@ -114,12 +114,20 @@ if [ -t 0 ]; then
     ai-dikte setup
     echo ""
     echo -e "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-    ai-dikte doctor
+    ai-dikte check-config
+    systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP DESKTOP_SESSION
+    if [ "$DESKTOP_KIND" = "hyprland" ]; then
+        systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE
+    fi
+    systemctl --user daemon-reload
+    systemctl --user enable --now ai-dikte.service
+    systemctl --user is-active --quiet ai-dikte.service
     echo ""
     echo -e "${GREEN}${BOLD}Setup complete!${NC} Press ${BOLD}Meta+Z${NC} to start dictation."
 else
     echo -e "${BOLD}Initial configuration was not run because no interactive terminal is available.${NC}"
     echo "Installation is complete, but setup is still required:"
     echo "  ai-dikte setup"
-    echo "  ai-dikte doctor"
+    echo "  ai-dikte check-config"
+    echo "  systemctl --user enable --now ai-dikte.service"
 fi

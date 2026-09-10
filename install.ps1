@@ -3,7 +3,7 @@
 #   irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 
 [CmdletBinding()]
-param()
+param([string]$ArtifactDirectory)
 
 $ErrorActionPreference = "Stop"
 
@@ -18,15 +18,7 @@ Write-Host "${BOLD}${BLUE}==>${NC} ${BOLD}AI Dikte Installer for Windows${NC}"
 
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\AI-Dikte"
 $exePath = Join-Path $installDir "ai-dikte.exe"
-$cmdLauncher = Join-Path $installDir "ai-dikte.cmd"
-$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$appName = "AI-Dikte"
-$programsFolder = [Environment]::GetFolderPath("Programs")
-$startMenuLnk = Join-Path $programsFolder "AI Dikte.lnk"
-$runtimeOverride = Join-Path $installDir "ai-dikte"
-$downloadExe = Join-Path $env:TEMP "ai-dikte-windows-$PID.exe"
-$downloadChecksum = "$downloadExe.sha256"
-
+$stage = Join-Path $env:TEMP ("ai-dikte-" + [guid]::NewGuid())
 
 function Set-PreferredUserPath {
     param(
@@ -61,12 +53,6 @@ function Set-PreferredUserPath {
     $env:Path = "$Preferred;$env:Path"
 }
 
-function Remove-LegacyStartupFiles {
-    $startupFolder = [Environment]::GetFolderPath("Startup")
-    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.vbs") -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path (Join-Path $startupFolder "ai-dikte-startup.cmd") -Force -ErrorAction SilentlyContinue
-}
-
 function Start-DaemonProcess {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
@@ -74,28 +60,11 @@ function Start-DaemonProcess {
     )
 
     Write-Host "${BOLD}${BLUE}==>${NC} Starting background hotkey listener..."
-    $daemon = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    $daemon = Start-Process -FilePath $Executable -ArgumentList $Arguments -PassThru
     Start-Sleep -Seconds 1
     $daemon.Refresh()
     if ($daemon.HasExited) { throw "Background listener exited during startup (code $($daemon.ExitCode))." }
     Write-Host "${GREEN}[OK]${NC} Background listener process is running."
-}
-
-function Write-StartMenuShortcut {
-    param(
-        [Parameter(Mandatory = $true)][string]$Executable,
-        [string]$Arguments = "daemon"
-    )
-
-    $wscript = New-Object -ComObject WScript.Shell
-    $shortcut = $wscript.CreateShortcut($startMenuLnk)
-    $shortcut.TargetPath = $Executable
-    $shortcut.Arguments = $Arguments
-    $shortcut.WorkingDirectory = Split-Path $Executable
-    $shortcut.Description = "AI Dikte - Minimal Dictation using Gemini 3.5"
-    $shortcut.IconLocation = "$Executable,0"
-    $shortcut.Save()
-    Write-Host "${BOLD}${BLUE}==>${NC} Created Start Menu shortcut: $startMenuLnk"
 }
 
 function Stop-InstalledDaemon {
@@ -112,60 +81,64 @@ function Stop-InstalledDaemon {
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+New-Item -ItemType Directory -Path $stage | Out-Null
+
+$assetName = 'ai-dikte-windows.exe'
+$installedName = 'ai-dikte.exe'
 
 try {
-    Write-Host "${BOLD}${BLUE}==>${NC} Looking for the latest standalone Windows release..."
-    $release = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/Yakrel/ai-dikte/releases/tags/latest" `
-        -Headers @{ "User-Agent" = "ai-dikte-installer"; "Accept" = "application/vnd.github+json" }
-
-    $asset = $release.assets |
-        Where-Object { $_.name -eq "ai-dikte-windows.exe" } |
-        Select-Object -First 1
-    $checksumAsset = $release.assets |
-        Where-Object { $_.name -eq "ai-dikte-windows.exe.sha256" } |
-        Select-Object -First 1
-    if (-not $asset -or -not $checksumAsset) {
-        throw "Latest release is missing the executable or its SHA-256 checksum"
+    if (-not $ArtifactDirectory) {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Yakrel/ai-dikte/releases/tags/latest" `
+            -Headers @{ "User-Agent" = "ai-dikte-installer"; "Accept" = "application/vnd.github+json" }
     }
 
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $downloadExe
-    Invoke-WebRequest -Uri $checksumAsset.browser_download_url -OutFile $downloadChecksum
-
-    $checksumText = (Get-Content -Path $downloadChecksum -Raw).Trim()
-    $checksumMatch = [regex]::Match($checksumText, '\A([a-fA-F0-9]{64})(?:\s|$)')
-    if (-not $checksumMatch.Success) {
-        throw "Release checksum file is malformed"
-    }
-    $expectedHash = $checksumMatch.Groups[1].Value.ToLowerInvariant()
-    $actualHash = (Get-FileHash -Path $downloadExe -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualHash -ne $expectedHash) {
-        throw "Standalone executable SHA-256 checksum mismatch"
+    foreach ($name in @($assetName, ($assetName + '.sha256'))) {
+        $destination = Join-Path $stage $name
+        if ($ArtifactDirectory) {
+            Copy-Item -LiteralPath (Join-Path $ArtifactDirectory $name) -Destination $destination
+        } else {
+            $assets = @($release.assets | Where-Object { $_.name -eq $name })
+            if ($assets.Count -ne 1) { throw "Release must contain exactly one $name" }
+            Invoke-WebRequest -Uri $assets[0].browser_download_url -OutFile $destination
+        }
     }
 
-    Unblock-File -Path $downloadExe
-    Write-Host "${BOLD}${BLUE}==>${NC} Verifying standalone executable..."
-    $verifyProc = Start-Process -FilePath $downloadExe -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
-    if ($verifyProc.ExitCode -ne 0) {
-        throw "Standalone executable self-test failed with exit code $($verifyProc.ExitCode)"
+    $download = Join-Path $stage $assetName
+    $checksumText = (Get-Content -LiteralPath "$download.sha256" -Raw).Trim()
+    $match = [regex]::Match($checksumText, '\A([a-fA-F0-9]{64})(?:\s|$)')
+    if (-not $match.Success) { throw "Malformed checksum: $assetName" }
+    if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ine $match.Groups[1].Value) {
+        throw "SHA-256 checksum mismatch: $assetName"
     }
+    Unblock-File -LiteralPath $download
+
+    # Verify self-test before replacing installation
+    $proc = Start-Process -FilePath $download -ArgumentList '--self-test' -Wait -PassThru
+    if ($proc.ExitCode -ne 0) { throw "Self-test failed: $assetName" }
 
     Stop-InstalledDaemon -ExecutablePaths @($exePath)
-    Move-Item -Path $downloadExe -Destination $exePath -Force
-    Remove-Item -Path $runtimeOverride -Force -ErrorAction SilentlyContinue
-    Write-Host "${GREEN}[OK]${NC} Installed verified standalone executable: $exePath"
-}
-catch {
+
+    $destination = Join-Path $installDir $installedName
+    $backup = Join-Path $stage ($installedName + '.backup')
+    if (Test-Path -LiteralPath $destination) {
+        Copy-Item -LiteralPath $destination -Destination $backup
+    }
+
+    try {
+        Move-Item -LiteralPath $download -Destination $destination -Force
+    } catch {
+        if (Test-Path -LiteralPath $backup) {
+            Copy-Item -LiteralPath $backup -Destination $destination -Force
+        }
+        throw
+    }
+} catch {
     throw "AI Dikte installation failed: $($_.Exception.Message). No alternative installation was attempted."
-}
-finally {
-    Remove-Item -Path $downloadExe, $downloadChecksum -Force -ErrorAction SilentlyContinue
+} finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-('@echo off' + "`r`n" + '"%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe" %*') | Out-File -FilePath $cmdLauncher -Encoding ASCII -Force
 Set-PreferredUserPath -Preferred $installDir
-Remove-LegacyStartupFiles
-Write-StartMenuShortcut -Executable $exePath -Arguments "daemon"
 
 Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
 $setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
@@ -174,14 +147,19 @@ if ($setupProc.ExitCode -ne 0) {
 }
 
 Write-Host "${BOLD}${BLUE}==>${NC} Running diagnostic checks..."
-$doctorProc = Start-Process -FilePath $exePath -ArgumentList "doctor" -Wait -PassThru -NoNewWindow
+$doctorProc = Start-Process -FilePath $exePath -ArgumentList "check-config" -Wait -PassThru -NoNewWindow
 if ($doctorProc.ExitCode -ne 0) {
     throw "AI Dikte diagnostics failed. Resolve the reported problem before starting dictation."
 }
 
+# Preserve an existing opt-in startup entry, now targeting the unified binary with daemon argument.
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+if (Get-ItemProperty -Path $runKey -Name 'AI-Dikte' -ErrorAction SilentlyContinue) {
+    Set-ItemProperty -Path $runKey -Name 'AI-Dikte' -Value ('"' + $exePath + '" daemon')
+}
 Start-DaemonProcess -Executable $exePath -Arguments "daemon"
 
 Write-Host ""
-Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Sign-in startup follows your Settings selection."
+Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Toggle recording with Win+Z."
 Write-Host "Command: ${BOLD}ai-dikte${NC}"
 exit 0

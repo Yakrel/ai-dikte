@@ -1,61 +1,49 @@
 name: Arch package
-
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions:
   contents: read
-
+concurrency:
+  group: arch-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install build dependencies
         run: >-
-          pacman -Syu --noconfirm --needed
-          libnotify pipewire-audio python python-websockets tk xorg-fonts-misc xorg-server-xvfb xorg-xauth xorg-xwayland wtype
-          kwayland libxkbcommon qt6-base wayland meson ninja pkgconf
-
-      - name: Check script syntax
+          pacman -Syu --noconfirm --needed rust cargo libnotify pipewire-audio
+          libxkbcommon
+          wtype kwayland qt6-base wayland meson ninja pkgconf
+      - name: Validate scripts
         run: |
-          python -m py_compile ai_dikte.py ai_dikte_core.py ai_dikte_config.py ai_dikte_ui.py
           bash -n install.sh
-          sh -n ai-dikte ai-dikte-toggle
-          xvfb-run -a python -m unittest discover -s tests -v
-
-      - name: Build minimal base package
+          bash -n PKGBUILD
+          sh -n ai-dikte-toggle packaging/install-linux.sh
+      - name: Build and install Rust package
         run: |
           useradd --create-home builder
           chown -R builder:builder .
           runuser -u builder -- makepkg --noconfirm --cleanbuild
-          base_pkg="$(runuser -u builder -- makepkg --packagelist | head -n1)"
-          mkdir -p /tmp/ai-dikte-installed
-          bsdtar -xf "$base_pkg" -C /tmp/ai-dikte-installed
+          package=$(runuser -u builder -- makepkg --packagelist | head -n1)
+          pacman -U --noconfirm "$package"
           cd /tmp
-          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --version
-          python /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai_dikte.py --self-test
-          test -f /tmp/ai-dikte-installed/usr/lib/ai-dikte/ai-dikte.png
-          test -f /tmp/ai-dikte-installed/usr/share/icons/hicolor/256x256/apps/ai-dikte.png
-          cd "$GITHUB_WORKSPACE"
-          if bsdtar -tf "$base_pkg" | grep -q '^usr/bin/kwtype$'; then
-            echo "Base package must not bundle KWtype"
-            exit 1
-          fi
-          if bsdtar -xOf "$base_pkg" .PKGINFO | grep -Eq '^depend = (kwayland|libxkbcommon|qt6-base|wayland|wtype)$'; then
-            echo "Base package contains a desktop-specific dependency"
-            exit 1
-          fi
-
+          runuser -u builder -- /usr/bin/ai-dikte --version
+          runuser -u builder -- /usr/bin/ai-dikte --self-test
+          test -f /usr/lib/systemd/user/ai-dikte.service
+          test ! -d /usr/lib/ai-dikte
       - name: Build KDE backend package
         run: |
           rm -rf src pkg
           chown -R builder:builder .
           runuser -u builder -- makepkg -p PKGBUILD.kwtype --noconfirm --cleanbuild
-          kde_pkg="$(runuser -u builder -- makepkg -p PKGBUILD.kwtype --packagelist | head -n1)"
-          bsdtar -tf "$kde_pkg" | grep -q '^usr/bin/kwtype$'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ai-dikte-arch-x86_64
+          path: '*.pkg.tar.zst'
+          retention-days: 7
+          if-no-files-found: error

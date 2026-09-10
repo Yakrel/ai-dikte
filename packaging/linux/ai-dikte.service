@@ -1,0 +1,12 @@
+[Unit]
+Description=AI Dikte voice dictation
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ai-dikte daemon
+TimeoutStopSec=35
+
+[Install]
+WantedBy=graphical-session.target

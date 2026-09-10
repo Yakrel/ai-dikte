@@ -20,21 +20,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Run runtime contract tests
-        run: python -m unittest discover -s tests -v
-
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Test Rust application
+        run: cargo +1.98.1 test --locked --manifest-path rust/Cargo.toml
       - name: Validate Windows installer syntax
         shell: pwsh
         run: |
@@ -54,44 +43,39 @@ jobs:
         shell: pwsh
         run: ./tests/test_installer.ps1
 
-      - name: Source runtime self-test
-        run: python ai_dikte.py --self-test
-
-      - name: Build standalone Windows executable
+      - name: Build standalone Rust Windows executable
         shell: pwsh
         run: |
-          pyinstaller `
-            --onefile `
-            --windowed `
-            --name "ai-dikte-windows" `
-            --icon "ai-dikte.ico" `
-            --add-data "ai-dikte.png;." `
-            --collect-submodules websockets `
-            --collect-data _sounddevice_data `
-            --hidden-import pystray._win32 `
-            --clean `
-            ai_dikte.py
+          cargo +1.98.1 build --locked --release --manifest-path rust/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Rust build failed" }
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item rust/target/release/ai-dikte.exe dist/ai-dikte-windows.exe
 
-      - name: Smoke test frozen executable
+      - name: Smoke test Rust executable
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath ".\dist\ai-dikte-windows.exe" -ArgumentList "--version" -Wait -PassThru -NoNewWindow
           if ($proc.ExitCode -ne 0) {
-            throw "Frozen executable version test failed with exit code $($proc.ExitCode)"
+            throw "Rust executable version test failed with exit code $($proc.ExitCode)"
           }
 
           $proc = Start-Process -FilePath ".\dist\ai-dikte-windows.exe" -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
           if ($proc.ExitCode -ne 0) {
-            throw "Frozen executable runtime self-test failed with exit code $($proc.ExitCode)"
+            throw "Rust executable runtime self-test failed with exit code $($proc.ExitCode)"
           }
+      - name: Verify Windows GUI subsystem
+        shell: pwsh
+        run: |
+          $bytes = [IO.File]::ReadAllBytes((Resolve-Path "./dist/ai-dikte-windows.exe"))
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+          if ($subsystem -ne 2) { throw "Wrong Windows subsystem: expected 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI), got $subsystem" }
+
       - name: Create SHA-256 checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash ".\dist\ai-dikte-windows.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  ai-dikte-windows.exe" | Set-Content `
-            -Path ".\dist\ai-dikte-windows.exe.sha256" `
-            -Encoding ascii `
-            -NoNewline
+          $hash = (Get-FileHash "./dist/ai-dikte-windows.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ai-dikte-windows.exe" | Set-Content -Path "./dist/ai-dikte-windows.exe.sha256" -Encoding ascii -NoNewline
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

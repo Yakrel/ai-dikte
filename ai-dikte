@@ -1,7 +1,0 @@
-#!/bin/sh
-set -eu
-
-LAUNCHER=$(readlink -f -- "$0")
-BIN_DIR=$(dirname -- "$LAUNCHER")
-LIB_DIR=$(CDPATH= cd -- "$BIN_DIR/../lib/ai-dikte" && pwd)
-exec python3 "$LIB_DIR/ai_dikte.py" "$@"

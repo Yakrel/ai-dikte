@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=AI Dikte Settings
+Name=AI Dikte
 Comment=Configure AI dictation
-Exec=ai-dikte setup
+Exec=ai-dikte menu
 TryExec=ai-dikte
-Terminal=false
+Terminal=true
 Icon=ai-dikte
 Categories=Utility;
