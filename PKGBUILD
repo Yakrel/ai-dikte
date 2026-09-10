@@ -47,7 +47,7 @@ for file in "${_sources[@]}"; do
   source+=("${file##*/}::file://$startdir/$file")
 done
 sha256sums=(
-  '53cc2c3df40bf2e2a067d92046daaa892ccbfa87ae516b36081a124d05a41f05'
+  '1c7a2fa6914bee5eaf118ecc2ce9435af280ac36e5bba41605122419e431294d'
   '6dcfd15fb0b83383bcdbf419e9a995979dd5d4cfeb4e5322c23765807c4325a7'
   '5a9ce8027186e1ea80c881ec71c7b7433bcec1f037cd81be42a882ece5923588'
   '1027173fcec47fe37d61e2caf508fdcfceaf0128f6379ab4ffc61c3d9c52dcf2'

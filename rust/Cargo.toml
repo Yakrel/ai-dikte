@@ -29,7 +29,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [dev-dependencies]
 
 [profile.release]
-lto = "thin"
+lto = false
 strip = true
 
 [target.'cfg(unix)'.dependencies]
