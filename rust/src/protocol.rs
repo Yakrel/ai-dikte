@@ -3,11 +3,27 @@ use crate::config::Config;
 use anyhow::{Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{fmt, time::Duration};
 pub const MODEL: &str = "gemini-3.5-transcribe-live";
 pub const RATE: u32 = 16000;
 pub const SETTLE: Duration = Duration::from_millis(500);
 pub const FINAL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Expected outcome for an otherwise successful recording that contains no speech.
+/// Keeping this typed avoids coupling UI behavior to error-message text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoSpeech;
+impl fmt::Display for NoSpeech {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("no speech detected")
+    }
+}
+impl std::error::Error for NoSpeech {}
+
+pub fn is_no_speech(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<NoSpeech>().is_some()
+}
+
 pub fn setup(config: &Config) -> Value {
     let mut transcription = json!({"languageCodes": [config.language], "mode": config.mode});
     if !config.custom_vocabulary.is_empty() {
@@ -68,6 +84,9 @@ impl Transcript {
         }
         Ok(())
     }
+    pub fn has_text(&self) -> bool {
+        self.pending_interim || !self.segments.is_empty()
+    }
     pub fn ready(&self, now: Duration, stopped_at: Duration) -> bool {
         !self.pending_interim
             && (self.complete || !self.segments.is_empty())
@@ -78,7 +97,7 @@ impl Transcript {
             bail!("Transcription is incomplete; text was not typed");
         }
         if self.segments.is_empty() {
-            bail!("Gemini returned no transcription");
+            return Err(NoSpeech.into());
         }
         Ok(self.segments.join(" "))
     }
@@ -147,6 +166,18 @@ mod tests {
             .unwrap();
         assert!(!t.ready(Duration::from_millis(500), Duration::ZERO));
         assert!(t.ready(Duration::from_millis(900), Duration::ZERO));
+    }
+    #[test]
+    fn empty_completed_turn_is_typed_no_speech() {
+        let mut transcript = Transcript::default();
+        transcript
+            .receive(
+                &json!({"serverContent":{"turnComplete":true}}),
+                Duration::ZERO,
+            )
+            .unwrap();
+        let error = transcript.finish().unwrap_err();
+        assert!(is_no_speech(&error));
     }
     #[test]
     fn errors_do_not_echo_secrets() {
