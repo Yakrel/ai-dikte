@@ -77,9 +77,6 @@ pub fn check_configuration() -> Result<()> {
         for program in ["pw-record", "notify-send", crate::output::driver()?] {
             require_program(program)?;
         }
-        if config.audio_cue {
-            require_program("pw-play")?;
-        }
     }
     Ok(())
 }

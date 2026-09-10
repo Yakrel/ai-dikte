@@ -17,9 +17,6 @@ pub async fn run_cancellable(
     mut cancelled: oneshot::Receiver<()>,
 ) -> Result<()> {
     let key = config.key()?;
-    if config.audio_cue {
-        crate::cue::play(false).await?;
-    }
     let audio::Capture { audio, stop, task } = audio::start(&config)?;
     let transcription = live::transcribe(&config, &key, audio);
     let Some(text) =
@@ -31,11 +28,6 @@ pub async fn run_cancellable(
         biased;
         _ = &mut cancelled => return Ok(()),
         result = output::type_text(&text) => result?,
-    }
-    if config.audio_cue
-        && let Err(error) = crate::cue::play(true).await
-    {
-        eprintln!("Text typed, but audio cue failed: {error}");
     }
     Ok(())
 }

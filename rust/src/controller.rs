@@ -36,7 +36,7 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
             biased;
             command = commands.recv() => matches!(command, None | Some(Command::Quit)),
             result = &mut recording => {
-                report(&match result { Ok(()) => "Ready".into(), Err(e) => format!("Error: {e:#}") });
+                report(&format_result(result));
                 continue;
             }
         };
@@ -58,7 +58,7 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
                     report("Still finishing; wait for Ready");
                 }
                 result = &mut recording => {
-                    report(&match result { Ok(()) => "Ready".into(), Err(e) => format!("Error: {e:#}") });
+                    report(&format_result(result));
                     break;
                 }
             }
@@ -66,5 +66,13 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
         if quitting {
             break;
         }
+    }
+}
+
+fn format_result(result: anyhow::Result<()>) -> String {
+    match result {
+        Ok(()) => "Ready".into(),
+        Err(e) if e.to_string().contains("no transcription") => "No speech detected".into(),
+        Err(e) => format!("Error: {e:#}"),
     }
 }

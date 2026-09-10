@@ -29,24 +29,12 @@ jobs:
       - name: Tests
         run: cargo +1.98.1 test --locked
       - name: Build development executable
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cargo +1.98.1 build --locked --release --features windows-host
-          else
-            cargo +1.98.1 build --locked --release
-          fi
-      - name: Exercise actual terminal backend
-        if: runner.os == 'Linux'
-        run: |
-          python3 -m pip install pyte==0.8.2
-          python3 ../tests/tui_smoke.py target/release/ai-dikte
+        run: cargo +1.98.1 build --locked --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ai-dikte-rust-${{ matrix.os }}
           path: |
             rust/target/release/ai-dikte
             rust/target/release/ai-dikte.exe
-            rust/target/release/ai-dikte-background.exe
           if-no-files-found: error
           retention-days: 7

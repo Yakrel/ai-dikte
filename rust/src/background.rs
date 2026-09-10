@@ -12,6 +12,38 @@ pub fn running() -> Result<bool> {
     }
 }
 
+pub fn start() -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::windows::ensure_background()
+    }
+    #[cfg(not(windows))]
+    {
+        let output = systemctl(&["start", "ai-dikte.service"])?;
+        anyhow::ensure!(
+            output.status.success(),
+            "Cannot start user service; check systemctl --user status ai-dikte.service"
+        );
+        Ok(())
+    }
+}
+
+pub fn stop() -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::windows::stop_daemon()
+    }
+    #[cfg(not(windows))]
+    {
+        let output = systemctl(&["stop", "ai-dikte.service"])?;
+        anyhow::ensure!(
+            output.status.success(),
+            "Cannot stop user service; check systemctl --user status ai-dikte.service"
+        );
+        Ok(())
+    }
+}
+
 pub fn startup_enabled() -> Result<bool> {
     #[cfg(windows)]
     {
@@ -30,6 +62,7 @@ pub fn startup_enabled() -> Result<bool> {
         }
     }
 }
+
 pub fn set_startup(enabled: bool) -> Result<()> {
     #[cfg(windows)]
     {
@@ -48,6 +81,7 @@ pub fn set_startup(enabled: bool) -> Result<()> {
         Ok(())
     }
 }
+
 #[cfg(not(windows))]
 fn systemctl(args: &[&str]) -> Result<std::process::Output> {
     use anyhow::Context;

@@ -46,11 +46,10 @@ jobs:
       - name: Build standalone Rust Windows executable
         shell: pwsh
         run: |
-          cargo +1.98.1 build --locked --release --features windows-host --manifest-path rust/Cargo.toml
+          cargo +1.98.1 build --locked --release --manifest-path rust/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw "Rust build failed" }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Copy-Item rust/target/release/ai-dikte.exe dist/ai-dikte-windows.exe
-          Copy-Item rust/target/release/ai-dikte-background.exe dist/ai-dikte-background.exe
 
       - name: Smoke test Rust executable
         shell: pwsh
@@ -64,24 +63,19 @@ jobs:
           if ($proc.ExitCode -ne 0) {
             throw "Rust executable runtime self-test failed with exit code $($proc.ExitCode)"
           }
-      - name: Verify console and background subsystem separation
+      - name: Verify Windows GUI subsystem
         shell: pwsh
         run: |
-          foreach ($entry in @(@{Name='ai-dikte-windows.exe'; Subsystem=3}, @{Name='ai-dikte-background.exe'; Subsystem=2})) {
-            $bytes = [IO.File]::ReadAllBytes((Resolve-Path "./dist/$($entry.Name)"))
-            $pe = [BitConverter]::ToInt32($bytes, 0x3c)
-            $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
-            if ($subsystem -ne $entry.Subsystem) { throw "Wrong Windows subsystem: $($entry.Name)" }
-          }
+          $bytes = [IO.File]::ReadAllBytes((Resolve-Path "./dist/ai-dikte-windows.exe"))
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+          if ($subsystem -ne 2) { throw "Wrong Windows subsystem: expected 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI), got $subsystem" }
+
       - name: Create SHA-256 checksum
         shell: pwsh
         run: |
-          foreach ($name in @('ai-dikte-windows.exe', 'ai-dikte-background.exe')) {
-            $hash = (Get-FileHash "./dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $name" | Set-Content -Path "./dist/$name.sha256" -Encoding ascii -NoNewline
-          }
-          $hostProc = Start-Process -FilePath './dist/ai-dikte-background.exe' -ArgumentList '--self-test' -Wait -PassThru
-          if ($hostProc.ExitCode -ne 0) { throw 'Background host self-test failed' }
+          $hash = (Get-FileHash "./dist/ai-dikte-windows.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ai-dikte-windows.exe" | Set-Content -Path "./dist/ai-dikte-windows.exe.sha256" -Encoding ascii -NoNewline
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -90,8 +84,6 @@ jobs:
           path: |
             dist/ai-dikte-windows.exe
             dist/ai-dikte-windows.exe.sha256
-            dist/ai-dikte-background.exe
-            dist/ai-dikte-background.exe.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -127,8 +119,6 @@ jobs:
               gh release upload "$tag" \
                 dist/ai-dikte-windows.exe \
                 dist/ai-dikte-windows.exe.sha256 \
-                dist/ai-dikte-background.exe \
-                dist/ai-dikte-background.exe.sha256 \
                 --clobber
               gh release edit "$tag" \
                 --title "Latest Windows Build" \
@@ -138,8 +128,6 @@ jobs:
               gh release create "$tag" \
                 dist/ai-dikte-windows.exe \
                 dist/ai-dikte-windows.exe.sha256 \
-                dist/ai-dikte-background.exe \
-                dist/ai-dikte-background.exe.sha256 \
                 --title "Latest Windows Build" \
                 --notes "Automatically built and runtime-tested from commit $GITHUB_SHA." \
                 --latest
@@ -150,15 +138,11 @@ jobs:
               gh release upload "$tag" \
                 dist/ai-dikte-windows.exe \
                 dist/ai-dikte-windows.exe.sha256 \
-                dist/ai-dikte-background.exe \
-                dist/ai-dikte-background.exe.sha256 \
                 --clobber
             else
               gh release create "$tag" \
                 dist/ai-dikte-windows.exe \
                 dist/ai-dikte-windows.exe.sha256 \
-                dist/ai-dikte-background.exe \
-                dist/ai-dikte-background.exe.sha256 \
                 --title "AI Dikte $tag" \
                 --generate-notes
             fi

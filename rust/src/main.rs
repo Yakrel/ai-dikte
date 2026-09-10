@@ -1,70 +1,107 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use ai_dikte::{
     config::{self, Config},
     session, ui,
 };
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+
 #[derive(Parser)]
-#[command(version, about = "AI Dikte Rust development build")]
+#[command(version, about = "AI Dikte - Minimal Dictation with Gemini")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     #[arg(long)]
     self_test: bool,
 }
+
 #[derive(Subcommand)]
 enum Command {
+    /// Background hotkey listener daemon
     Daemon,
+    /// (Linux) Start or stop active recording
     #[cfg(not(windows))]
     Toggle,
+    /// First-run setup wizard (API key entry)
     Setup,
+    /// Interactive console menu
     Menu,
+    /// Show service status and configuration
     Status,
+    /// System diagnostics report
     Diagnostics,
-    LogView,
+    /// Self-check and connection diagnostics
     Doctor,
+    /// Show session log
     Logs,
+    /// Isolated runtime self-test without network or credentials
     SelfTest,
+    /// Check local configuration and system devices
     CheckConfig,
     #[cfg(not(windows))]
     ShortcutInstall,
     #[cfg(not(windows))]
     ShortcutRemove,
-    /// Record until Ctrl+C, then type finalized text.
+    /// Record from microphone until Ctrl+C, then type text
     Record,
 }
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("AI Dikte: {error:#}");
         std::process::exit(1);
     }
 }
+
 fn run() -> Result<()> {
     let args = Args::parse();
     if args.self_test {
+        #[cfg(windows)]
+        ai_dikte::windows::ensure_console();
         return ai_dikte::diagnostics::self_test();
     }
-    #[cfg(windows)]
-    let default_launch = args.command.is_none();
-    let command = args.command.unwrap_or(Command::Menu);
-    let result = match command {
+
+    let is_daemon = matches!(args.command, Some(Command::Daemon));
+    if !is_daemon {
+        #[cfg(windows)]
+        ai_dikte::windows::ensure_console();
+    }
+
+    let command = match args.command {
+        Some(cmd) => cmd,
+        None => {
+            let path = config::path()?;
+            if !path.exists() {
+                Command::Setup
+            } else {
+                let config = Config::load(&path).unwrap_or_default();
+                if config.key().is_err() {
+                    Command::Setup
+                } else {
+                    Command::Menu
+                }
+            }
+        }
+    };
+
+    match command {
         Command::SelfTest => ai_dikte::diagnostics::self_test(),
         Command::CheckConfig => ai_dikte::diagnostics::check_configuration(),
         #[cfg(not(windows))]
         Command::ShortcutInstall => ai_dikte::shortcut::update(true),
         #[cfg(not(windows))]
         Command::ShortcutRemove => ai_dikte::shortcut::update(false),
-        Command::Setup => ui::setup(),
+        Command::Setup => ui::first_run_setup(),
         Command::Menu => ui::menu(),
         Command::Diagnostics => ui::diagnostics_menu(),
-        Command::LogView => ui::logs_menu(),
         Command::Status => {
             println!(
-                "Background app: {}",
+                "Background service: {}",
                 if ai_dikte::background::running()? {
-                    "running"
+                    "RUNNING"
                 } else {
-                    "not running"
+                    "NOT RUNNING"
                 }
             );
             println!("{}", ai_dikte::diagnostics::report());
@@ -102,11 +139,5 @@ fn run() -> Result<()> {
             interrupt.abort();
             result
         }),
-    };
-    #[cfg(windows)]
-    if result.is_ok() && default_launch && config::path()?.exists() {
-        ai_dikte::diagnostics::check_configuration()?;
-        ai_dikte::windows::ensure_background()?;
     }
-    result
 }

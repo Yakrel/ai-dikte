@@ -1,145 +1,132 @@
 # AI Dikte
 
-Windows ve Linux Wayland için Rust ile yazılmış Gemini sesli yazma uygulaması.
-**Win+Z / Meta+Z** ile kaydı başlatın; tekrar basınca kesinleşmiş metin odaktaki uygulamaya yazılır.
+Minimal, fast, and local voice dictation utility for Windows and Linux Wayland powered by Google Gemini Live.
 
-> Rust geçişi PR #8 üzerinde geliştiriliyor. Gerçek cihaz kabul testleri bitene kadar draft durumundadır. Yapılanlar ve kalanlar: [RUST_MIGRATION.md](RUST_MIGRATION.md).
+Press **Win+Z** (Windows) or **Meta+Z** (Linux) to start talking; press it again to finish. Transcribed text is instantly typed into the active window.
 
-## Özellikler
+---
 
-- Gemini `gemini-3.5-transcribe-live`, Türkçe varsayılan dil, SMART / VERBATIM ve özel kelimeler.
-- Windows: WASAPI mikrofon, Win+Z hook, doğrudan Unicode SendInput, tray, odak çalmayan durum göstergesi, başlangıç seçeneği.
-- Linux: PipeWire kayıt; KDE Plasma'da yalnız **kwtype**, Hyprland / Omarchy'de yalnız **wtype**.
-- Windows ve Linux için ortak Ratatui terminal menüsü; Linux'ta 0600 izinli atomik JSON kaydı, Windows'ta Credential Manager API anahtarı.
-- Kayıt/bağlantı/çıktı hatalarında açık hata; otomatik alternatif backend veya Python kurulumu yok.
-- Sesli bildirim varsayılan kapalı. Bildirim ve ses tercihleri bağımsızdır.
+## Installation
 
-Arayüz İngilizcedir; **Spoken language** yalnız konuşma dilini belirler. **Smart** dolgu sözcüklerini temizleyip metni düzenler; **Verbatim** tekrarlar ve dolgu sözcükleri dahil söylenenleri korur. [Gemini mod açıklamaları](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
+### Windows
 
-## Windows
-
-Rust sürümü main'e alındıktan sonra PowerShell'de:
+Run this single command in **PowerShell** (no administrator privileges required):
 
 ```powershell
 irm https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.ps1 | iex
 ```
 
-Installer terminal uygulaması ve konsolsuz arka plan çalıştırıcısının SHA256 değerlerini doğrular, her ikisinin self-test'ini çalıştırır, kullanıcı hesabına kurar ve TUI ayarlarını açar. Yönetici yetkisi veya Python gerekmez. Otomatik başlangıç tray menüsünden açılır.
+*What this does:*
+- Downloads the standalone `ai-dikte-windows.exe` and verifies its SHA-256 checksum.
+- Installs it to `%LOCALAPPDATA%\Programs\AI-Dikte\ai-dikte.exe` and adds it to your user `PATH`.
+- Opens the first-run setup in your terminal to enter and verify your Gemini API key.
+- Starts the silent background listener daemon and enables it to run at sign-in.
 
-**PR sürümünü main'e almadan test etmek için:** PR'ın **Build Windows Executable** Actions koşusundaki `ai-dikte-windows` artifact'ini indirin ve ZIP'i açın. Eski daemon'dan çıkın. ZIP içindeki iki EXE ve iki SHA256 dosyasını aynı klasörde tutun. Bu daldaki installer dosyaları doğru adlarla kurar:
+---
 
-```powershell
-.\install.ps1 -ArtifactDirectory C:\Path\To\ExtractedArtifact
-```
+### Linux (KDE Plasma & Hyprland / Omarchy)
 
-Mikrofonu ayarlar listesinden seçin. Seçilen aygıt kaybolursa başka mikrofon kullanılmaz; sistem varsayılanını açıkça seçebilirsiniz. Aynı isimli birden fazla aygıt varsa Windows varsayılan giriş aygıtını kullanın. Eski sayısal `input_device` ayarı varsa `config.json` içinden bu alanı kaldırıp yeniden seçin; eski ayarları taşıma kodu yoktur.
-
-## Arch / CachyOS / Omarchy
-
-Rust dalı main'e alındıktan sonra:
-
+#### Arch Linux / CachyOS / Omarchy (One-Line Installer)
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Yakrel/ai-dikte/main/install.sh)"
 ```
 
-Installer mevcut Wayland oturumuna göre gereken typing backend'i kurar, Rust paketini derler, ayarları açar ve kullanıcı daemon servisini etkinleştirir. Hyprland kısayol bloğu eklenir; yapılandırma hatasında değişiklik geri alınır.
-
-Bu dalı kaynaktan kurmak için:
-
+#### Arch Linux / CachyOS (Manual Source Build)
 ```sh
 makepkg --syncdeps --install
 ai-dikte setup
-ai-dikte check-config
-systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP DESKTOP_SESSION
-# Hyprland kullanıyorsanız:
-# systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE
-# ai-dikte shortcut-install
-systemctl --user daemon-reload
 systemctl --user enable --now ai-dikte.service
 ```
+*(For KDE, ensure `kwtype` is installed. For Hyprland, ensure `wtype` is installed.)*
 
-KDE için ayrıca `PKGBUILD.kwtype` ile KWtype kurun; Hyprland için `wtype` kurun. Çıplak Hyprland oturumlarında kullanıcı systemd yöneticisine Wayland ortamı her oturumda aktarılmalıdır; KDE/uwsm bunu oturum yönetimiyle sağlar.
-
-## Fedora KDE
-
-**Fedora KDE packages** Actions artifact'indeki iki RPM'i (`ai-dikte` ve `kwtype`) birlikte kurun:
-
+#### Fedora (RPM)
 ```sh
-sudo dnf install ./*.rpm
+sudo dnf install ./ai-dikte*.rpm
 ai-dikte setup
-ai-dikte check-config
-systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP DESKTOP_SESSION
-systemctl --user daemon-reload
 systemctl --user enable --now ai-dikte.service
 ```
 
-RPM kaynaktan Rust derler. CI, Cargo.lock ile bağımlılıkları önceden vendor eder; rpmbuild ağ erişimi olmadan `--frozen` çalışır.
-
-## NixOS
-
-Flake paketleri: `ai-dikte-kde`, `ai-dikte-hyprland`, `kwtype`.
-
+#### NixOS (Flake)
+Add `ai-dikte-kde` or `ai-dikte-hyprland` to your NixOS configuration:
+```nix
+environment.systemPackages = [ ai-dikte-kde ];
+systemd.packages = [ ai-dikte-kde ];
+```
+Then run:
 ```sh
-nix build .#ai-dikte-kde
-./result/bin/ai-dikte --self-test
+ai-dikte setup
+systemctl --user enable --now ai-dikte.service
 ```
 
-NixOS yapılandırmanızda seçilen paketi `environment.systemPackages` ve `systemd.packages` içine ekleyin. Kullanıcınızla `ai-dikte setup` çalıştırdıktan sonra `systemctl --user enable --now ai-dikte.service` kullanın. Wayland oturum ortamı kullanıcı systemd yöneticisine aktarılmış olmalıdır. Paket yalnız kendi masaüstü backend'ini PATH'e ekler; çalışma anında Python kullanmaz.
+#### Hotkey Binding on Linux:
+- **Hyprland:** Add to `hyprland.conf`:
+  ```ini
+  bind = $mainMod, Z, exec, ai-dikte toggle
+  ```
+- **KDE Plasma:** In System Settings -> Custom Shortcuts, bind `Meta+Z` to `ai-dikte toggle`.
 
-## Terminal menüsü
+---
 
-`ai-dikte` veya `ai-dikte menu` ile açılır. TUI İngilizcedir ve kayıt başlat/durdur içermez; kayıt **Win+Z / Meta+Z** ile yapılır. Menü kapanınca çalışan daemon etkilenmez. Windows'ta argümansız açılışta, ayarlar kaydedilmişse menüden çıktıktan sonra arka plan uygulaması çalıştırılır. Linux'ta daemon kurulumun etkinleştirdiği kullanıcı systemd servisi tarafından yönetilir.
+## How It Works
 
-| Bölüm | İşlev |
-|---|---|
-| Status | Arka plan uygulaması, mikrofon ve model bilgisi |
-| Settings | API anahtarı, dil, Smart/Verbatim, mikrofon ve özel kelimeler |
-| Preferences | Ses, bildirim ve oturum açılışında başlatma |
-| Diagnostics | T: kayıtlı API bağlantısını test et; C: yerel cihaz/backend kontrolü |
-| Logs | Oturum günlüğünü kaydırarak oku |
-| Exit menu | Yalnız menüyü kapat |
+1. **Hotkey:** Press `Win+Z` (Windows) or `Meta+Z` (Linux) anywhere (VS Code, Word, browser, etc.).
+2. **Visual Feedback:**
+   - **Windows:** A sleek, non-intrusive floating OSD capsule appears in the bottom-right corner:
+     - `● Listening...` (Pink dot) while you talk.
+     - `● Transcribing...` (Yellow dot) when you finish.
+     - `● Text inserted` (Green dot) when text is typed into the focused window.
+   - **Linux:** Desktop notifications appear via `notify-send`.
+3. **No Interruption:** No black console windows pop up; no system tray icon clutter.
 
-- **↑/↓**, **Enter**: gezin ve seç. Mikrofon alanında Enter sonraki aygıtı seçer; listenin sonunda sistem varsayılanına döner. **R** listeyi yeniler.
-- Metin alanında **←/→**, **Home/End**, **Backspace/Delete**; **Ctrl+U** temizler. API anahtarı sürekli maskelenir.
-- **Enter** düzenlemeyi taslağa uygular; **Esc** o düzenlemeyi iptal eder. Özel kelimeler için satır başına bir terim yapıştırın veya **Alt+Enter** kullanın.
-- **Ctrl+S** bağlantıyı doğrular ve kaydeder. Hatalı kayıtta önceki ayarlar korunur; taslak kaybolmaz.
-- **Esc** ana menüye döner, **Q** çıkar. Kaydedilmemiş taslak varsa **Y** ile silerek çıkış onaylanır.
-- Oturum açılışında başlatma tercihi hemen uygulanır; ses/bildirim tercihleri Ctrl+S ile kaydedilir. Bu seçenek mevcut kaydı veya daemon'ı başlatıp durdurmaz.
-- TUI etkileşimli terminal ister. Pipe/script kullanımı için aşağıdaki düz metin komutları vardır.
+---
 
-Windows paketi `ai-dikte.exe` (konsol/TUI) ve `ai-dikte-background.exe` (tray/Win+Z, konsolsuz) içerir. İkisi aynı Rust kütüphanesini kullanır ve birlikte kurulmalıdır. Tray'deki ayar/tanılama/günlük seçenekleri yeni bir terminal açar.
+## Settings & Interactive Menu
 
-## Komutlar
-
-| Komut | İşlev |
-|---|---|
-| `ai-dikte` / `ai-dikte menu` | TUI ana menüsü |
-| `ai-dikte setup` | TUI ayarları |
-| `ai-dikte status` | Düz metin daemon ve ayar durumu |
-| `ai-dikte diagnostics` / `ai-dikte log-view` | TUI tanılama / günlük ekranı |
-| `ai-dikte daemon` | Tek daemon; Windows tray / Linux kullanıcı servisi |
-| `ai-dikte toggle` | Linux daemon'a başlat/durdur isteği |
-| `ai-dikte doctor` | Anahtarı göstermeyen tanılama raporu |
-| `ai-dikte check-config` | Kurulum için yapılandırma/aygıt/backend kontrolü; hatada nonzero |
-| `ai-dikte logs` | Oturum günlüğü |
-| `ai-dikte --self-test` | Anahtar, mikrofon ve ağ gerektirmeyen runtime kontrolü |
-| `ai-dikte shortcut-install` / `shortcut-remove` | Hyprland'daki yönetilen kısayol bloğu |
-
-Ayarlar: Windows `%APPDATA%\ai-dikte\config.json`; Linux `$XDG_CONFIG_HOME/ai-dikte/config.json` (varsayılan `~/.config/ai-dikte/config.json`). `session.log` aynı dizindedir; ses ve transkript kaydedilmez. Linux kontrol soketi `$XDG_RUNTIME_DIR/ai-dikte-rust/control.sock` içindedir.
-
-`doctor` bağlantı veya mikrofon kaydı testi yapmaz. `check-config` API anahtarının bulunmasını ve yerel gereksinimleri kontrol eder; Gemini doğrulaması her **Ctrl+S** işleminde yapılır; bağlantı veya doğrulama başarısızsa ayarlar kaydedilmez. Windows yükseltilmiş uygulamalara yazmayı engelleyebilir; SendInput hatası açıkça gösterilir.
-
-## Geliştirme
-
-Rust 1.95+ ve platform derleme araçları gerekir. Windows ikon kaynağı için Windows SDK gerekir. TUI için grafik çizim kütüphanesi gerekmez; gerçek dikte için Linux'ta PipeWire ve masaüstüne uygun typing backend gerekir.
+To manage settings, test your microphone, or view diagnostics, simply run `ai-dikte` in any terminal:
 
 ```sh
-cd rust
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked --release
-# Windows paketinin iki çalıştırıcısını derlemek için:
-# cargo build --locked --release --features windows-host
+ai-dikte
 ```
 
-Rust kodu veya paketlenen dosyalar değişince kökte `packaging/update-arch-sources.sh` çalıştırarak PKGBUILD SHA256 değerlerini yenileyin. Python uygulaması kaldırıldı; önceki sürüm Git geçmişinde bulunur. Paket/CI ve gerçek cihaz doğrulamasının durumu [kontrol listesinde](RUST_MIGRATION.md) tutulur.
+```text
+=====================================================
+                   AI DIKTE (v0.5.0)                    
+=====================================================
+ [Status]     : Background service is RUNNING
+ [Hotkey]     : Win+Z (Press to talk, press to finish)
+ [Voice/Mode] : tr-TR (Smart)
+ [Microphone] : System Default
+-----------------------------------------------------
+ [1] Enter / Update API Key
+ [2] System & Connection Diagnostics (Doctor)
+ [3] Writing Style (Smart / Verbatim) & Vocabulary
+ [4] Start at Sign-in: [ENABLED]
+ [5] Background Service: [Stop]
+ [0] Exit
+-----------------------------------------------------
+ Choice [0-5]: _
+```
+
+- **English UI:** The interface is clean, minimal, and in English.
+- **Turkish Speech:** Voice recognition defaults to Turkish (`tr-TR`).
+
+---
+
+## Command Reference
+
+| Command | Description |
+|---|---|
+| `ai-dikte` / `ai-dikte menu` | Interactive console menu |
+| `ai-dikte setup` | First-run setup wizard (API key entry and test) |
+| `ai-dikte daemon` | Headless background hotkey listener |
+| `ai-dikte toggle` | (Linux) Trigger recording from desktop shortcut |
+| `ai-dikte status` | Plain text background service and configuration status |
+| `ai-dikte doctor` | Full diagnostics report (microphone, network, Gemini API) |
+| `ai-dikte logs` | Print recent session log |
+| `ai-dikte --self-test` | Runtime self-test without network or credentials |
+
+---
+
+## Architecture
+
+AI Dikte is built with pure Rust and zero heavy UI dependencies. Complete architectural decisions, invariants, and guidelines are documented in [AGENTS.md](AGENTS.md).
