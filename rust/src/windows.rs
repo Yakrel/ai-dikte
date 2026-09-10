@@ -129,7 +129,7 @@ unsafe extern "system" fn osd_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPA
                 // Background: #181825 (BGR: 0x00251818)
                 let bg_brush = CreateSolidBrush(0x00251818);
                 // Border: #313244 (BGR: 0x00443231)
-                let border_pen = CreatePen(PS_SOLID as i32, 1, 0x00443231);
+                let border_pen = CreatePen(PS_SOLID, 1, 0x00443231);
 
                 let old_brush = SelectObject(hdc, bg_brush);
                 let old_pen = SelectObject(hdc, border_pen);
@@ -153,11 +153,11 @@ unsafe extern "system" fn osd_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPA
                     0,
                     0,
                     0,
-                    DEFAULT_CHARSET,
-                    OUT_DEFAULT_PRECIS,
-                    CLIP_DEFAULT_PRECIS,
-                    CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_DONTCARE,
+                    DEFAULT_CHARSET as u32,
+                    OUT_DEFAULT_PRECIS as u32,
+                    CLIP_DEFAULT_PRECIS as u32,
+                    CLEARTYPE_QUALITY as u32,
+                    (DEFAULT_PITCH | FF_DONTCARE) as u32,
                     font_name.as_ptr(),
                 );
                 let old_font = SelectObject(hdc, font);
@@ -251,6 +251,7 @@ pub fn daemon() -> Result<()> {
             CloseHandle(mutex);
             bail!("AI Dikte background service is already running.");
         }
+        let stop_event = CreateEventW(null(), 0, 0, wide("Local\\AI-Dikte-Daemon-Stop").as_ptr());
         if stop_event.is_null() {
             CloseHandle(mutex);
             bail!("Cannot create daemon stop event");
@@ -366,9 +367,7 @@ pub fn daemon() -> Result<()> {
                     *state = (dot_color, display_text);
                 }
                 let hide_ms = auto_hide_ms.unwrap_or(0) as usize;
-                unsafe {
-                    PostMessageW(window_id as HWND, STATUS_MESSAGE, hide_ms, 0);
-                }
+                PostMessageW(window_id as HWND, STATUS_MESSAGE, hide_ms, 0);
             }))
         });
 
