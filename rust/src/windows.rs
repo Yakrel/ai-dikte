@@ -493,6 +493,40 @@ pub fn startup_enabled() -> Result<bool> {
     }
 }
 
+pub fn running() -> Result<bool> {
+    let handle = unsafe {
+        windows_sys::Win32::System::Threading::OpenMutexW(
+            0x00100000, // SYNCHRONIZE: only inspect whether the daemon mutex exists.
+            0,
+            wide("Local\\AI-Dikte-Daemon").as_ptr(),
+        )
+    };
+    if !handle.is_null() {
+        unsafe {
+            CloseHandle(handle);
+        }
+        return Ok(true);
+    }
+    let error = unsafe { GetLastError() };
+    if error == ERROR_FILE_NOT_FOUND {
+        Ok(false)
+    } else {
+        bail!("Cannot inspect background app ({error})")
+    }
+}
+
+pub fn ensure_background() -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    if running()? {
+        return Ok(());
+    }
+    std::process::Command::new(companion("ai-dikte-background.exe")?)
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+        .spawn()
+        .context("Cannot start background app")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,38 +561,4 @@ mod tests {
             ChordAction::Toggle
         );
     }
-}
-
-pub fn running() -> Result<bool> {
-    let handle = unsafe {
-        windows_sys::Win32::System::Threading::OpenMutexW(
-            0x00100000, // SYNCHRONIZE: only inspect whether the daemon mutex exists.
-            0,
-            wide("Local\\AI-Dikte-Daemon").as_ptr(),
-        )
-    };
-    if !handle.is_null() {
-        unsafe {
-            CloseHandle(handle);
-        }
-        return Ok(true);
-    }
-    let error = unsafe { GetLastError() };
-    if error == ERROR_FILE_NOT_FOUND {
-        Ok(false)
-    } else {
-        bail!("Cannot inspect background app ({error})")
-    }
-}
-
-pub fn ensure_background() -> Result<()> {
-    use std::os::windows::process::CommandExt;
-    if running()? {
-        return Ok(());
-    }
-    std::process::Command::new(companion("ai-dikte-background.exe")?)
-        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
-        .spawn()
-        .context("Cannot start background app")?;
-    Ok(())
 }
