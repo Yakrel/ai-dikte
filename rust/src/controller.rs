@@ -1,7 +1,7 @@
 //! A single owner serializes hotkey events. Finishing never starts a new recording.
 use crate::{
     config::{self, Config},
-    session,
+    protocol, session,
 };
 use tokio::sync::{mpsc, oneshot};
 #[derive(Clone, Copy)]
@@ -72,7 +72,7 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
 fn format_result(result: anyhow::Result<()>) -> String {
     match result {
         Ok(()) => "Ready".into(),
-        Err(e) if e.to_string().contains("no transcription") => "No speech detected".into(),
+        Err(e) if protocol::is_no_speech(&e) => "No speech detected".into(),
         Err(e) => format!("Error: {e:#}"),
     }
 }
@@ -88,8 +88,17 @@ mod tests {
 
     #[test]
     fn test_format_result_no_speech() {
-        let err = anyhow::anyhow!("Gemini returned no transcription");
+        let err = anyhow::Error::new(protocol::NoSpeech);
         assert_eq!(format_result(Err(err)), "No speech detected");
+    }
+
+    #[test]
+    fn ordinary_errors_that_mention_transcription_are_not_reclassified() {
+        let err = anyhow::anyhow!("upstream returned no transcription metadata");
+        assert_eq!(
+            format_result(Err(err)),
+            "Error: upstream returned no transcription metadata"
+        );
     }
 
     #[test]
