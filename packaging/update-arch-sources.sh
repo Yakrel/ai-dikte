@@ -35,10 +35,14 @@ prepare() {
   cargo fetch --locked
 }
 build() {
+  export CFLAGS+=" -ffat-lto-objects"
+  export CXXFLAGS+=" -ffat-lto-objects"
   cd "$srcdir/project/rust"
   cargo build --frozen --release
 }
 check() {
+  export CFLAGS+=" -ffat-lto-objects"
+  export CXXFLAGS+=" -ffat-lto-objects"
   cd "$srcdir/project/rust"
   cargo test --frozen --release
   ./target/release/ai-dikte --self-test
