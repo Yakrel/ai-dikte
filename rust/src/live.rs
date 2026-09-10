@@ -1,4 +1,5 @@
 use crate::{
+    activity::AudioActivity,
     config::Config,
     protocol::{self, Transcript},
 };
@@ -15,6 +16,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
+const SILENT_CLOSE_TIMEOUT: Duration = Duration::from_millis(250);
 async fn send(socket: &mut Socket, value: Value) -> Result<()> {
     timeout(
         IO_TIMEOUT,
@@ -99,22 +101,41 @@ pub async fn transcribe(
     let socket = connect(config, key).await?;
     stream(socket, audio).await
 }
+async fn close_silent(socket: &mut Socket) {
+    // Silence is already a committed local outcome. Do not make the user wait
+    // for Gemini's normal finalization timeout just to complete a close handshake.
+    let _ = timeout(SILENT_CLOSE_TIMEOUT, socket.close(None)).await;
+}
 async fn stream(mut socket: Socket, mut audio: mpsc::Receiver<Result<Vec<u8>>>) -> Result<String> {
     send(&mut socket, json!({"realtimeInput":{"activityStart":{}}})).await?;
     let start = Instant::now();
     let mut transcript = Transcript::default();
+    let mut activity = AudioActivity::default();
     let mut has_audio = false;
     loop {
         tokio::select! {
             message = receive(&mut socket) => transcript.receive(&message?, start.elapsed())?,
             chunk = audio.recv() => match chunk {
-                Some(chunk) => { send(&mut socket, protocol::audio(&chunk?)?).await?; has_audio = true; }
+                Some(chunk) => {
+                    let chunk = chunk?;
+                    activity.observe_pcm16(&chunk)?;
+                    send(&mut socket, protocol::audio(&chunk)?).await?;
+                    has_audio = true;
+                }
                 None => break,
             }
         }
     }
     if !has_audio {
-        bail!("No audio captured; check microphone");
+        close_silent(&mut socket).await;
+        return Err(protocol::NoSpeech.into());
+    }
+    // The local meter is deliberately conservative. It only bypasses remote
+    // finalization when the signal is clearly silent and Gemini has not already
+    // observed any transcript text. Ambiguous/quiet audio keeps the old path.
+    if activity.clearly_silent() && !transcript.has_text() {
+        close_silent(&mut socket).await;
+        return Err(protocol::NoSpeech.into());
     }
     send(&mut socket, json!({"realtimeInput":{"activityEnd":{}}})).await?;
     let stopped_at = start.elapsed();
@@ -182,12 +203,22 @@ mod tests {
                 ))
                 .await
                 .unwrap();
-            for field in ["activityStart", "audio", "activityEnd"] {
+            for field in ["activityStart", "audio"] {
                 let message: Value =
                     serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
                         .unwrap();
                 assert!(!message["realtimeInput"][field].is_null());
             }
+            if outcome == "silence" {
+                // The client intentionally closes instead of waiting up to the
+                // normal finalization timeout for an empty transcript.
+                let _ = socket.next().await;
+                return;
+            }
+            let message: Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            assert!(!message["realtimeInput"]["activityEnd"].is_null());
             if outcome == "disconnect" {
                 socket.close(None).await.unwrap();
                 return;
@@ -212,11 +243,24 @@ mod tests {
         });
         (url, task)
     }
+    fn voiced_chunk() -> Vec<u8> {
+        (0..1600)
+            .flat_map(|index| {
+                let sample: i16 = if index % 2 == 0 { 2_000 } else { -2_000 };
+                sample.to_le_bytes()
+            })
+            .collect()
+    }
     async fn exercise(outcome: &'static str) -> Result<String> {
         let (url, server) = mock(outcome).await;
         let socket = connect_at(&Config::default(), "test-only", &url).await?;
         let (tx, rx) = mpsc::channel(2);
-        tx.send(Ok(vec![0; 3200])).await.unwrap();
+        let chunk = if outcome == "silence" {
+            vec![0; 3200]
+        } else {
+            voiced_chunk()
+        };
+        tx.send(Ok(chunk)).await.unwrap();
         drop(tx);
         let result = tokio::time::timeout(Duration::from_secs(3), stream(socket, rx))
             .await
@@ -227,6 +271,13 @@ mod tests {
     #[tokio::test]
     async fn wire_session_preserves_repeated_finals_without_turn_complete() {
         assert_eq!(exercise("success").await.unwrap(), "Evet. Evet.");
+    }
+    #[tokio::test]
+    async fn obvious_silence_finishes_without_remote_finalization_wait() {
+        let started = Instant::now();
+        let error = exercise("silence").await.unwrap_err();
+        assert!(protocol::is_no_speech(&error));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
     #[tokio::test]
     async fn disconnect_never_returns_partial_text() {
