@@ -1,4 +1,3 @@
-#![cfg_attr(windows, windows_subsystem = "windows")]
 use ai_dikte::{
     config::{self, Config},
     session, ui,
@@ -19,6 +18,10 @@ enum Command {
     #[cfg(not(windows))]
     Toggle,
     Setup,
+    Menu,
+    Status,
+    Diagnostics,
+    LogView,
     Doctor,
     Logs,
     SelfTest,
@@ -31,31 +34,8 @@ enum Command {
     Record,
 }
 fn main() {
-    #[cfg(windows)]
-    unsafe {
-        windows_sys::Win32::System::Console::AttachConsole(u32::MAX);
-    }
     if let Err(error) = run() {
         eprintln!("AI Dikte: {error:#}");
-        #[cfg(windows)]
-        {
-            use windows_sys::Win32::UI::WindowsAndMessaging::*;
-            let message: Vec<u16> = format!("AI Dikte: {error:#}\0").encode_utf16().collect();
-            let title: Vec<u16> = "AI Dikte\0".encode_utf16().collect();
-            if !matches!(
-                std::env::args().nth(1).as_deref(),
-                Some("check-config" | "self-test" | "--self-test")
-            ) {
-                unsafe {
-                    MessageBoxW(
-                        std::ptr::null_mut(),
-                        message.as_ptr(),
-                        title.as_ptr(),
-                        MB_ICONERROR,
-                    );
-                }
-            }
-        }
         std::process::exit(1);
     }
 }
@@ -65,21 +45,9 @@ fn run() -> Result<()> {
         return ai_dikte::diagnostics::self_test();
     }
     #[cfg(windows)]
-    let command = match args.command {
-        None => {
-            if !config::path()?.exists() {
-                ui::setup()?;
-                if !config::path()?.exists() {
-                    return Ok(());
-                }
-            }
-            Command::Daemon
-        }
-        Some(command) => command,
-    };
-    #[cfg(not(windows))]
-    let command = args.command.unwrap_or(Command::Setup);
-    match command {
+    let default_launch = args.command.is_none();
+    let command = args.command.unwrap_or(Command::Menu);
+    let result = match command {
         Command::SelfTest => ai_dikte::diagnostics::self_test(),
         Command::CheckConfig => ai_dikte::diagnostics::check_configuration(),
         #[cfg(not(windows))]
@@ -87,6 +55,21 @@ fn run() -> Result<()> {
         #[cfg(not(windows))]
         Command::ShortcutRemove => ai_dikte::shortcut::update(false),
         Command::Setup => ui::setup(),
+        Command::Menu => ui::menu(),
+        Command::Diagnostics => ui::diagnostics_menu(),
+        Command::LogView => ui::logs_menu(),
+        Command::Status => {
+            println!(
+                "Background app: {}",
+                if ai_dikte::background::running()? {
+                    "running"
+                } else {
+                    "not running"
+                }
+            );
+            println!("{}", ai_dikte::diagnostics::report());
+            Ok(())
+        }
         #[cfg(windows)]
         Command::Daemon => {
             ai_dikte::diagnostics::check_configuration()?;
@@ -100,18 +83,13 @@ fn run() -> Result<()> {
         #[cfg(not(windows))]
         Command::Toggle => tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::toggle()),
         Command::Doctor => {
-            let report = ai_dikte::diagnostics::report();
-            #[cfg(windows)]
-            {
-                ui::text_window("AI Dikte — Diagnostics", report)
-            }
-            #[cfg(not(windows))]
-            {
-                println!("{report}");
-                Ok(())
-            }
+            println!("{}", ai_dikte::diagnostics::report());
+            Ok(())
         }
-        Command::Logs => ui::text_window("AI Dikte — Session log", ai_dikte::diagnostics::log()?),
+        Command::Logs => {
+            println!("{}", ai_dikte::diagnostics::log()?);
+            Ok(())
+        }
         Command::Record => tokio::runtime::Runtime::new()?.block_on(async {
             let config = Config::load(&config::path()?)?;
             let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -124,5 +102,11 @@ fn run() -> Result<()> {
             interrupt.abort();
             result
         }),
+    };
+    #[cfg(windows)]
+    if result.is_ok() && default_launch && config::path()?.exists() {
+        ai_dikte::diagnostics::check_configuration()?;
+        ai_dikte::windows::ensure_background()?;
     }
+    result
 }

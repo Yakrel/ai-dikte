@@ -97,11 +97,21 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         CallNextHookEx(null_mut(), code, wp, lp)
     }
 }
+fn companion(name: &str) -> Result<std::path::PathBuf> {
+    let path = std::env::current_exe()?.with_file_name(name);
+    anyhow::ensure!(
+        path.is_file(),
+        "Missing {name}; reinstall the complete AI Dikte package"
+    );
+    Ok(path)
+}
 fn launch(command: &str) -> Result<()> {
-    std::process::Command::new(std::env::current_exe()?)
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(companion("ai-dikte.exe")?)
         .arg(command)
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_CONSOLE)
         .spawn()
-        .context("Cannot open settings")?;
+        .context("Cannot open terminal menu")?;
     Ok(())
 }
 unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -176,9 +186,11 @@ unsafe extern "system" fn window(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARA
                             }
                         }
                         4 | 5 => {
-                            if let Err(error) =
-                                launch(if selected == 4 { "doctor" } else { "logs" })
-                            {
+                            if let Err(error) = launch(if selected == 4 {
+                                "diagnostics"
+                            } else {
+                                "log-view"
+                            }) {
                                 MessageBoxW(
                                     hwnd,
                                     wide(&error.to_string()).as_ptr(),
@@ -416,6 +428,14 @@ pub fn daemon() -> Result<()> {
 
 pub fn set_startup(enabled: bool) -> Result<()> {
     use windows_sys::Win32::System::Registry::*;
+    let startup_value = if enabled {
+        Some(wide(&format!(
+            "\"{}\"",
+            companion("ai-dikte-background.exe")?.display()
+        )))
+    } else {
+        None
+    };
     unsafe {
         let mut key = null_mut();
         let result = RegCreateKeyExW(
@@ -433,10 +453,7 @@ pub fn set_startup(enabled: bool) -> Result<()> {
             bail!("Cannot open startup registry key ({result})");
         }
         let result = if enabled {
-            let value = wide(&format!(
-                "\"{}\" daemon",
-                std::env::current_exe()?.display()
-            ));
+            let value = startup_value.as_ref().unwrap();
             RegSetValueExW(
                 key,
                 wide("AI-Dikte").as_ptr(),
@@ -510,4 +527,38 @@ mod tests {
             ChordAction::Toggle
         );
     }
+}
+
+pub fn running() -> Result<bool> {
+    let handle = unsafe {
+        windows_sys::Win32::System::Threading::OpenMutexW(
+            0x00100000, // SYNCHRONIZE: only inspect whether the daemon mutex exists.
+            0,
+            wide("Local\\AI-Dikte-Daemon").as_ptr(),
+        )
+    };
+    if !handle.is_null() {
+        unsafe {
+            CloseHandle(handle);
+        }
+        return Ok(true);
+    }
+    let error = unsafe { GetLastError() };
+    if error == ERROR_FILE_NOT_FOUND {
+        Ok(false)
+    } else {
+        bail!("Cannot inspect background app ({error})")
+    }
+}
+
+pub fn ensure_background() -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    if running()? {
+        return Ok(());
+    }
+    std::process::Command::new(companion("ai-dikte-background.exe")?)
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+        .spawn()
+        .context("Cannot start background app")?;
+    Ok(())
 }

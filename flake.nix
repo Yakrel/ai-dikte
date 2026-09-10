@@ -63,17 +63,12 @@
         buildAndTestSubdir = "rust";
         cargoLock.lockFile = ./rust/Cargo.lock;
         nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
-        buildInputs = [ pkgs.wayland pkgs.libxkbcommon pkgs.libGL ];
         # Nix builds disallow socket creation; the dedicated native CI runs the
         # same localhost WebSocket tests without this sandbox restriction.
         checkFlags = [ "--skip" "live::tests" ];
         postInstall = ''
           wrapProgram "$out/bin/ai-dikte" \
-            --prefix PATH : ${lib.makeBinPath [ typingBackend pkgs.pipewire pkgs.libnotify ]} \
-            --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [
-              pkgs.wayland pkgs.libxkbcommon pkgs.libGL
-              pkgs.xorg.libX11 pkgs.xorg.libXcursor pkgs.xorg.libXi pkgs.xorg.libXrandr
-            ]}
+            --prefix PATH : ${lib.makeBinPath [ typingBackend pkgs.pipewire pkgs.libnotify pkgs.systemd ]}
           install -Dm755 ai-dikte-toggle "$out/bin/ai-dikte-toggle"
           substituteInPlace "$out/bin/ai-dikte-toggle" \
             --replace-fail 'exec ai-dikte toggle' "exec $out/bin/ai-dikte toggle"

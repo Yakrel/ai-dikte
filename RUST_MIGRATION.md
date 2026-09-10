@@ -2,6 +2,23 @@
 
 Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/paket yollarını Rust'a geçirmek. PR gerçek cihaz kabul testleri bitene kadar draft kalır.
 
+## TUI geçişi — 10 Eylül
+- [x] egui/eframe kaldırıldı; Rust çekirdeği korunarak Ratatui/Crossterm TUI eklendi
+- [x] Status, Settings, Preferences, Diagnostics, Logs, Exit menu; menüde kayıt başlat/durdur yok
+- [x] Unicode metin düzenleme, maskeli anahtar, özel kelime yapıştırma, değişiklikleri silme onayı, küçük terminal desteği
+- [x] Ortak doğrulanmış ayar yazıcısı; arka planda API testi/kayıt ve başarısızlıkta taslağı koruma
+- [x] Windows gerçek konsol TUI + konsolsuz background EXE; tray terminal penceresi açar
+- [x] Windows installer/release iki EXE ve iki checksum içerir; eksik/bozuk companion eski kurulumu değiştirmez
+- [x] Linux desktop launcher terminal açar; grafik bağımlılıkları Arch/Fedora/Nix paketlerinden kaldırıldı
+- [x] Kilitli bağımlılık sayısı 381 → 263; doğrudan CLI tanılama/günlük çıktıları korunur
+- [x] TUI için 6 yeni davranış/render testi; önceki ayar kaydı ve oturum testleri korunur
+- [x] Rust 1.95: 34 test, Clippy, fmt, self-test ve gerçek PTY gezinme/gizleme/çıkış/terminal restorasyonu geçti
+- [ ] TUI commit'inin Windows/Linux/Arch/Fedora/Nix CI sonuçları PR açıklamasında güncellenecek
+- [ ] Gerçek Windows Terminal / PowerShell / tray ve Win+Z mikrofon kabul testi
+- [ ] Gerçek KDE/Hyprland terminal / Meta+Z ve Gemini uçtan uca kabul testi
+
+Önceki GUI geliştirme kayıtları aşağıda tarihçe olarak tutulur; güncel kullanıcı arayüzü tamamen TUI'dir.
+
 ## Yan senaryo incelemesi — 9 Eylül
 - [x] Daemon çıkışını normal durdurmadan ayır: kayıt/finalizasyon iptalinde metin yazma, mikrofon görevini bekleyerek temizle
 - [x] Tamamlanmış kayıt görevinin iptalde ikinci kez poll edilmesini önle; kayıt sırasında ve sonrasında iptal testleri
@@ -11,7 +28,7 @@ Dal: `rewrite/rust`. Amaç: Windows ve Linux uygulaması ile bütün kurulum/pak
 - [x] Ayar dosyası yazılamazsa Windows anahtarını geri al; ilk anahtarın kaldırılması ve eski anahtarın korunması testleri
 - [x] Kaydetme sürerken ayar penceresinin kapanıp işlemi yarıda kesmesini engelle
 - [x] Rust 1.95 ile yerelde 28 test, Clippy (`-D warnings`), fmt ve uygulama self-test
-- [ ] Yeni değişikliklerin Windows/Linux ve Arch/Fedora/Nix CI kontrolleri (sonuçlar PR açıklamasında güncellenecek)
+- [x] `a8e8388` yan senaryo düzeltmelerinin Windows/Linux/Arch/Fedora/Nix CI kontrolleri geçti (TUI öncesi)
 
 ## Arayüz ve anahtar doğrulama düzeltmesi
 - [x] Tamamen İngilizce, bölümlere ayrılmış ayar ekranı ve okunabilir metin/boşluk düzeni

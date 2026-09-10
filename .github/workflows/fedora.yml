@@ -33,7 +33,7 @@ jobs:
           useradd --create-home builder
           mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
           tar -czf /tmp/rpmbuild/SOURCES/ai-dikte-0.5.0.tar.gz \
-            --exclude=rust/target --exclude=rust/.cargo --exclude=rust/settings.png \
+            --exclude=rust/target --exclude=rust/.cargo \
             --transform 's,^,ai-dikte-0.5.0/,' \
             rust ai-dikte-toggle ai-dikte.png ai-dikte.ico ai-dikte.desktop ai-dikte-settings.desktop packaging LICENSE
           cargo vendor --locked --manifest-path rust/Cargo.toml /tmp/vendor > /tmp/vendor-config.toml

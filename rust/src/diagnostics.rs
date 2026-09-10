@@ -53,7 +53,13 @@ pub fn report() -> String {
 }
 pub fn log() -> Result<String> {
     let path = crate::config::path()?.with_file_name("session.log");
-    Ok(std::fs::read_to_string(path)?)
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok("No sessions logged yet.".into())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub fn check_configuration() -> Result<()> {
@@ -93,11 +99,6 @@ pub fn require_program(program: &str) -> Result<()> {
     anyhow::bail!("Required program is missing: {program}")
 }
 pub fn self_test() -> Result<()> {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../ai-dikte.png"))?;
-    anyhow::ensure!(
-        icon.width > 0 && icon.height > 0,
-        "Invalid application icon"
-    );
     let mut transcript = crate::protocol::Transcript::default();
     for _ in 0..2 {
         transcript.receive(

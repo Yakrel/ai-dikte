@@ -17,7 +17,7 @@ jobs:
       - name: Install build dependencies
         run: >-
           pacman -Syu --noconfirm --needed rust cargo libnotify pipewire-audio
-          libxkbcommon libxkbcommon-x11 libglvnd libx11 libxcursor libxi libxrandr
+          libxkbcommon
           wtype kwayland qt6-base wayland meson ninja pkgconf
       - name: Validate scripts
         run: |

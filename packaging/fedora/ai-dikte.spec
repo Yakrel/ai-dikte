@@ -14,23 +14,13 @@ BuildRequires:  pkgconf-pkg-config
 Requires:       kwtype
 Requires:       libnotify
 Requires:       pipewire-utils
-Requires:       libxkbcommon
-Requires:       libxkbcommon-x11
-Requires:       libX11
-Requires:       libXcursor
-Requires:       libXi
-Requires:       libXrandr
-Requires:       libglvnd-egl
-Requires:       libglvnd-glx
-Requires:       libwayland-client
-Requires:       libwayland-cursor
-Requires:       libwayland-egl
 Requires:       hicolor-icon-theme
+Requires:       systemd
 
 %description
 AI Dikte records microphone audio with PipeWire, transcribes it with Gemini,
 and types the result into the focused application using KWtype. Includes
-native Rust settings and a user service for Meta+Z dictation.
+terminal settings and a user service for Meta+Z dictation.
 
 %prep
 %autosetup
