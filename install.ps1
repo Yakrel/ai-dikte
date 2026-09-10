@@ -53,20 +53,6 @@ function Set-PreferredUserPath {
     $env:Path = "$Preferred;$env:Path"
 }
 
-function Start-DaemonProcess {
-    param(
-        [Parameter(Mandatory = $true)][string]$Executable,
-        [string]$Arguments = "daemon"
-    )
-
-    Write-Host "${BOLD}${BLUE}==>${NC} Starting background hotkey listener..."
-    $daemon = Start-Process -FilePath $Executable -ArgumentList $Arguments -PassThru
-    Start-Sleep -Seconds 1
-    $daemon.Refresh()
-    if ($daemon.HasExited) { throw "Background listener exited during startup (code $($daemon.ExitCode))." }
-    Write-Host "${GREEN}[OK]${NC} Background listener process is running."
-}
-
 function Stop-InstalledDaemon {
     param([Parameter(Mandatory = $true)][string[]]$ExecutablePaths)
 
@@ -140,6 +126,8 @@ try {
 
 Set-PreferredUserPath -Preferred $installDir
 
+# `setup` is intentionally one-shot. It validates and saves the key, starts the
+# daemon and enables sign-in startup, then returns control to this installer.
 Write-Host "${BOLD}${BLUE}==>${NC} Running initial configuration..."
 $setupProc = Start-Process -FilePath $exePath -ArgumentList "setup" -Wait -PassThru -NoNewWindow
 if ($setupProc.ExitCode -ne 0) {
@@ -151,13 +139,6 @@ $doctorProc = Start-Process -FilePath $exePath -ArgumentList "check-config" -Wai
 if ($doctorProc.ExitCode -ne 0) {
     throw "AI Dikte diagnostics failed. Resolve the reported problem before starting dictation."
 }
-
-# Preserve an existing opt-in startup entry, now targeting the unified binary with daemon argument.
-$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-if (Get-ItemProperty -Path $runKey -Name 'AI-Dikte' -ErrorAction SilentlyContinue) {
-    Set-ItemProperty -Path $runKey -Name 'AI-Dikte' -Value ('"' + $exePath + '" daemon')
-}
-Start-DaemonProcess -Executable $exePath -Arguments "daemon"
 
 Write-Host ""
 Write-Host "${GREEN}${BOLD}Setup complete!${NC} AI Dikte is running. Toggle recording with Win+Z."
