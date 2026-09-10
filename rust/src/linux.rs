@@ -45,7 +45,10 @@ impl Drop for SocketGuard {
     }
 }
 pub fn running() -> Result<bool> {
-    let path = runtime_dir()?.join("daemon.lock");
+    let Ok(dir) = runtime_dir() else {
+        return Ok(false);
+    };
+    let path = dir.join("daemon.lock");
     let lock = match OpenOptions::new()
         .read(true)
         .write(true)

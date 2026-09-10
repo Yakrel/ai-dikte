@@ -178,13 +178,7 @@ fn update_api_key(config: &mut Config, path: &Path) -> Result<()> {
     println!();
     println!("--- Update API Key ---");
     let current = config.key().unwrap_or_default();
-    let masked = if current.len() > 8 {
-        format!("{}...{}", &current[..4], &current[current.len() - 4..])
-    } else if !current.is_empty() {
-        "****".to_string()
-    } else {
-        "Not configured".to_string()
-    };
+    let masked = mask_key(&current);
     println!(" Current Key: {masked}");
     println!(" (Press Enter without typing to keep the current key)");
     print!(" New Gemini API Key: ");
@@ -289,11 +283,7 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                 io::stdin().read_line(&mut words)?;
                 let words = words.trim();
                 if !words.is_empty() {
-                    config.custom_vocabulary = words
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
+                    config.custom_vocabulary = parse_vocabulary(words);
                     save_config_change(config, path)?;
                     println!(" [OK] Custom vocabulary updated.");
                 }
@@ -333,4 +323,47 @@ fn toggle_daemon(running: bool) -> Result<()> {
         println!("STARTED.");
     }
     Ok(())
+}
+
+pub fn mask_key(key: &str) -> String {
+    if key.len() > 8 {
+        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+    } else if !key.is_empty() {
+        "****".to_string()
+    } else {
+        "Not configured".to_string()
+    }
+}
+
+pub fn parse_vocabulary(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mask_key() {
+        assert_eq!(mask_key(""), "Not configured");
+        assert_eq!(mask_key("12345"), "****");
+        assert_eq!(mask_key("1234567890"), "1234...7890");
+    }
+
+    #[test]
+    fn test_parse_vocabulary() {
+        assert_eq!(parse_vocabulary(""), Vec::<String>::new());
+        assert_eq!(
+            parse_vocabulary("  Kubernetes , Rust, , DevOps "),
+            vec![
+                "Kubernetes".to_string(),
+                "Rust".to_string(),
+                "DevOps".to_string()
+            ]
+        );
+    }
 }

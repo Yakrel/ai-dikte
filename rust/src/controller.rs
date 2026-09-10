@@ -76,3 +76,25 @@ fn format_result(result: anyhow::Result<()>) -> String {
         Err(e) => format!("Error: {e:#}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_result_ready() {
+        assert_eq!(format_result(Ok(())), "Ready");
+    }
+
+    #[test]
+    fn test_format_result_no_speech() {
+        let err = anyhow::anyhow!("Gemini returned no transcription");
+        assert_eq!(format_result(Err(err)), "No speech detected");
+    }
+
+    #[test]
+    fn test_format_result_error() {
+        let err = anyhow::anyhow!("Network timeout");
+        assert_eq!(format_result(Err(err)), "Error: Network timeout");
+    }
+}
