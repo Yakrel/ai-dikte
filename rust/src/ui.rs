@@ -5,12 +5,23 @@ use crate::{
     config::{self, Config, Mode},
     diagnostics, live, settings,
 };
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use std::io::{self, Write};
 use std::path::Path;
 
+fn read_input() -> Result<Option<String>> {
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input)? == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(input))
+    }
+}
+
+/// Explicit `ai-dikte setup` is a one-shot command. This is important for the
+/// Windows installer, which waits for setup to finish before continuing.
 pub fn setup() -> Result<()> {
-    first_run_setup()
+    configure_first_run()
 }
 
 pub fn diagnostics_menu() -> Result<()> {
@@ -23,7 +34,17 @@ pub fn logs_menu() -> Result<()> {
     Ok(())
 }
 
+/// Zero-config launch path: configure once, then continue into the menu.
 pub fn first_run_setup() -> Result<()> {
+    configure_first_run()?;
+    println!("\n Press Enter to continue to the main menu...");
+    if read_input()?.is_none() {
+        return Ok(());
+    }
+    menu()
+}
+
+fn configure_first_run() -> Result<()> {
     let path = config::path()?;
     let config = if path.exists() {
         Config::load(&path).unwrap_or_default()
@@ -45,8 +66,9 @@ pub fn first_run_setup() -> Result<()> {
     loop {
         print!(" Gemini API Key: ");
         io::stdout().flush()?;
-        let mut key = String::new();
-        io::stdin().read_line(&mut key)?;
+        let Some(key) = read_input()? else {
+            bail!("Input closed before an API key was entered");
+        };
         let key = key.trim();
 
         if key.is_empty() {
@@ -81,23 +103,14 @@ pub fn first_run_setup() -> Result<()> {
     println!();
     print!(" -> Starting background listener service... ");
     io::stdout().flush()?;
-    if let Err(e) = background::start() {
-        println!("FAILED!");
-        eprintln!(" [!] Could not start background service: {e:#}");
-    } else {
-        println!("STARTED!");
-        let _ = background::set_startup(true);
-        println!(
-            " [OK] Background service is active and set to start at sign-in.\n      Press {} to dictate.",
-            if cfg!(windows) { "Win+Z" } else { "Meta+Z" }
-        );
-    }
-
-    println!("\n Press Enter to continue to the main menu...");
-    let mut pause = String::new();
-    io::stdin().read_line(&mut pause)?;
-
-    menu()
+    background::start().context("Could not start background service")?;
+    println!("STARTED!");
+    background::set_startup(true).context("Could not enable background service at sign-in")?;
+    println!(
+        " [OK] Background service is active and set to start at sign-in.\n      Press {} to dictate.",
+        if cfg!(windows) { "Win+Z" } else { "Meta+Z" }
+    );
+    Ok(())
 }
 
 pub fn menu() -> Result<()> {
@@ -156,8 +169,10 @@ pub fn menu() -> Result<()> {
         print!(" Choice [0-5]: ");
         io::stdout().flush()?;
 
-        let mut choice = String::new();
-        io::stdin().read_line(&mut choice)?;
+        let Some(choice) = read_input()? else {
+            println!("\n Input closed. Exiting AI Dikte menu.");
+            break;
+        };
         match choice.trim() {
             "1" => update_api_key(&mut config, &path)?,
             "2" => run_doctor(&path)?,
@@ -184,8 +199,10 @@ fn update_api_key(config: &mut Config, path: &Path) -> Result<()> {
     print!(" New Gemini API Key: ");
     io::stdout().flush()?;
 
-    let mut new_key = String::new();
-    io::stdin().read_line(&mut new_key)?;
+    let Some(new_key) = read_input()? else {
+        println!(" -> Input closed; no change made.");
+        return Ok(());
+    };
     let new_key = new_key.trim();
 
     if new_key.is_empty() {
@@ -234,8 +251,7 @@ fn run_doctor(path: &Path) -> Result<()> {
     }
 
     println!("\n Press Enter to return to menu...");
-    let mut pause = String::new();
-    io::stdin().read_line(&mut pause)?;
+    let _ = read_input()?;
     Ok(())
 }
 
@@ -256,15 +272,17 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
         print!(" Choice [0-3]: ");
         io::stdout().flush()?;
 
-        let mut choice = String::new();
-        io::stdin().read_line(&mut choice)?;
+        let Some(choice) = read_input()? else {
+            break;
+        };
         match choice.trim() {
             "1" => {
                 println!("\n Supported examples: tr-TR, en-US, de-DE, fr-FR");
                 print!(" Enter language code [Enter to keep {}]: ", config.language);
                 io::stdout().flush()?;
-                let mut lang = String::new();
-                io::stdin().read_line(&mut lang)?;
+                let Some(lang) = read_input()? else {
+                    break;
+                };
                 let lang = lang.trim();
                 if !lang.is_empty() {
                     config.language = lang.to_string();
@@ -296,8 +314,9 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                 println!(" Enter comma-separated terms (leave empty to keep current):");
                 print!(" Terms: ");
                 io::stdout().flush()?;
-                let mut words = String::new();
-                io::stdin().read_line(&mut words)?;
+                let Some(words) = read_input()? else {
+                    break;
+                };
                 let words = words.trim();
                 if !words.is_empty() {
                     config.custom_vocabulary = parse_vocabulary(words);
