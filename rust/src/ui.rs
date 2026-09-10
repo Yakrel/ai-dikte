@@ -242,20 +242,37 @@ fn run_doctor(path: &Path) -> Result<()> {
 fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
     loop {
         println!();
-        println!("--- Writing Style & Vocabulary ---");
-        println!(" [1] Writing Style    : {:?}", config.mode);
+        println!("--- Language, Style & Vocabulary ---");
         println!(
-            " [2] Custom Vocabulary: {} terms configured",
+            " [1] Spoken Language  : {} (Default: tr-TR)",
+            config.language
+        );
+        println!(" [2] Writing Style    : {:?}", config.mode);
+        println!(
+            " [3] Custom Vocabulary: {} terms configured",
             config.custom_vocabulary.len()
         );
         println!(" [0] Back");
-        print!(" Choice [0-2]: ");
+        print!(" Choice [0-3]: ");
         io::stdout().flush()?;
 
         let mut choice = String::new();
         io::stdin().read_line(&mut choice)?;
         match choice.trim() {
             "1" => {
+                println!("\n Supported examples: tr-TR, en-US, de-DE, fr-FR");
+                print!(" Enter language code [Enter to keep {}]: ", config.language);
+                io::stdout().flush()?;
+                let mut lang = String::new();
+                io::stdin().read_line(&mut lang)?;
+                let lang = lang.trim();
+                if !lang.is_empty() {
+                    config.language = lang.to_string();
+                    save_config_change(config, path)?;
+                    println!(" [OK] Spoken language set to {}.", config.language);
+                }
+            }
+            "2" => {
                 config.mode = if config.mode == Mode::Smart {
                     Mode::Verbatim
                 } else {
@@ -269,7 +286,7 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                     println!("     (Verbatim: Types exact spoken words and repetitions)");
                 }
             }
-            "2" => {
+            "3" => {
                 let words_display = if config.custom_vocabulary.is_empty() {
                     " (None)".to_string()
                 } else {
