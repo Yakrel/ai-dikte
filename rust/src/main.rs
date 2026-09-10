@@ -73,15 +73,13 @@ fn run() -> Result<()> {
         None => {
             let path = config::path()?;
             if !path.exists() {
-                Command::Setup
-            } else {
-                let config = Config::load(&path).unwrap_or_default();
-                if config.key().is_err() {
-                    Command::Setup
-                } else {
-                    Command::Menu
-                }
+                return ui::first_run_setup();
             }
+            let config = Config::load(&path).unwrap_or_default();
+            if config.key().is_err() {
+                return ui::first_run_setup();
+            }
+            Command::Menu
         }
     };
 
@@ -92,7 +90,9 @@ fn run() -> Result<()> {
         Command::ShortcutInstall => ai_dikte::shortcut::update(true),
         #[cfg(not(windows))]
         Command::ShortcutRemove => ai_dikte::shortcut::update(false),
-        Command::Setup => ui::first_run_setup(),
+        // Explicit setup is intentionally one-shot. Installers can wait for it
+        // without being trapped inside the interactive menu afterwards.
+        Command::Setup => ui::setup(),
         Command::Menu => ui::menu(),
         Command::Diagnostics => ui::diagnostics_menu(),
         Command::Status => {
