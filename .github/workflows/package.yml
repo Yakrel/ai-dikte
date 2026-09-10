@@ -24,6 +24,10 @@ jobs:
           bash -n install.sh
           bash -n PKGBUILD
           sh -n ai-dikte-toggle packaging/install-linux.sh
+          bash packaging/update-arch-sources.sh
+          echo '--- BEGIN GENERATED PKGBUILD ---'
+          cat PKGBUILD
+          echo '--- END GENERATED PKGBUILD ---'
       - name: Build and install Rust package
         run: |
           useradd --create-home builder
