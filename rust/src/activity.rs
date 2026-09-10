@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 
 const RMS_SILENCE_THRESHOLD: f64 = 0.0032; // roughly -50 dBFS
-const PEAK_SILENCE_THRESHOLD: f64 = 0.018; // roughly -35 dBFS
+const PEAK_SILENCE_THRESHOLD: f64 = 0.010; // -40 dBFS
 
 #[derive(Debug, Default)]
 pub struct AudioActivity {
@@ -21,8 +21,8 @@ impl AudioActivity {
             bail!("Audio must contain complete signed 16-bit PCM samples");
         }
 
-        for sample in bytes.chunks_exact(2) {
-            let value = i16::from_le_bytes([sample[0], sample[1]]) as f64 / 32768.0;
+        for sample in bytes.as_chunks::<2>().0 {
+            let value = i16::from_le_bytes(*sample) as f64 / 32768.0;
             self.samples += 1;
             self.sum_squares += value * value;
             self.peak = self.peak.max(value.abs());
@@ -66,6 +66,15 @@ mod tests {
         let samples = (0..16_000).map(|index| if index % 2 == 0 { 64 } else { -64 });
         activity.observe_pcm16(&pcm(samples)).unwrap();
         assert!(activity.clearly_silent());
+    }
+
+    #[test]
+    fn quiet_speech_like_peak_falls_back_to_remote_finalization() {
+        let mut activity = AudioActivity::default();
+        let mut samples = vec![0; 16_000];
+        samples[8_000] = 400;
+        activity.observe_pcm16(&pcm(samples)).unwrap();
+        assert!(!activity.clearly_silent());
     }
 
     #[test]
