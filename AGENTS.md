@@ -71,7 +71,7 @@ AI Dikte is a minimal, fast, and local voice dictation utility powered by the Go
 
 - All Rust tests must be native Rust unit and integration tests executed via `cargo test`.
 - Integration tests live in `rust/tests/cli.rs` using Cargo's `env!("CARGO_BIN_EXE_ai-dikte")`.
-- No external Python scripts for testing Rust code.
+- No external test runner scripts; pure Cargo unit and integration tests only.
 - All code must pass `cargo test --locked`, `cargo fmt --check`, and `cargo clippy --locked --all-targets -- -D warnings`.
 
 ---
