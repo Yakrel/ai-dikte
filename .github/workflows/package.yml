@@ -19,11 +19,19 @@ jobs:
           pacman -Syu --noconfirm --needed rust cargo libnotify pipewire-audio
           libxkbcommon
           wtype kwayland qt6-base wayland meson ninja pkgconf
-      - name: Validate scripts
+      - name: Validate scripts and Arch source metadata
         run: |
           bash -n install.sh
           bash -n PKGBUILD
           sh -n ai-dikte-toggle packaging/install-linux.sh
+          cp PKGBUILD PKGBUILD.committed
+          bash packaging/update-arch-sources.sh
+          if ! cmp -s PKGBUILD.committed PKGBUILD; then
+            echo 'PKGBUILD source list/checksums are stale. Run packaging/update-arch-sources.sh and commit the result.'
+            diff -u PKGBUILD.committed PKGBUILD || true
+            exit 1
+          fi
+          rm PKGBUILD.committed
       - name: Build and install Rust package
         run: |
           useradd --create-home builder
