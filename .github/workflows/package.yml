@@ -1,0 +1,57 @@
+name: Arch package
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: arch-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed rust cargo libnotify pipewire-audio
+          libxkbcommon
+          wtype kwayland qt6-base wayland meson ninja pkgconf
+      - name: Validate scripts and Arch source metadata
+        run: |
+          bash -n install.sh
+          bash -n PKGBUILD
+          sh -n ai-dikte-toggle packaging/install-linux.sh
+          cp PKGBUILD PKGBUILD.committed
+          bash packaging/update-arch-sources.sh
+          if ! cmp -s PKGBUILD.committed PKGBUILD; then
+            echo 'PKGBUILD source list/checksums are stale. Run packaging/update-arch-sources.sh and commit the result.'
+            diff -u PKGBUILD.committed PKGBUILD || true
+            exit 1
+          fi
+          rm PKGBUILD.committed
+      - name: Build and install Rust package
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder .
+          runuser -u builder -- makepkg --noconfirm --cleanbuild
+          package=$(runuser -u builder -- makepkg --packagelist | head -n1)
+          pacman -U --noconfirm "$package"
+          cd /tmp
+          runuser -u builder -- /usr/bin/ai-dikte --version
+          runuser -u builder -- /usr/bin/ai-dikte --self-test
+          test -f /usr/lib/systemd/user/ai-dikte.service
+          test ! -d /usr/lib/ai-dikte
+      - name: Build KDE backend package
+        run: |
+          rm -rf src pkg
+          chown -R builder:builder .
+          runuser -u builder -- makepkg -p PKGBUILD.kwtype --noconfirm --cleanbuild
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ai-dikte-arch-x86_64
+          path: '*.pkg.tar.zst'
+          retention-days: 7
+          if-no-files-found: error

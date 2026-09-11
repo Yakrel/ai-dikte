@@ -1,0 +1,77 @@
+name: Fedora KDE packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    defaults:
+      run:
+        shell: bash
+    env:
+      KWTYPE_COMMIT: ac2c3864aaacc31afc252d88d1d4b669270f2f44
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install RPM build tools and dependencies
+        run: |
+          dnf -y install rpm-build redhat-rpm-config dnf5-plugins \
+            curl-minimal tar gzip coreutils shadow-utils cargo rust
+          dnf -y builddep packaging/fedora/ai-dikte.spec packaging/fedora/kwtype.spec
+
+      - name: Prepare checked-out application and pinned backend sources
+        run: |
+          useradd --create-home builder
+          mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+          tar -czf /tmp/rpmbuild/SOURCES/ai-dikte-0.5.0.tar.gz \
+            --exclude=rust/target --exclude=rust/.cargo \
+            --transform 's,^,ai-dikte-0.5.0/,' \
+            rust ai-dikte-toggle ai-dikte.png ai-dikte.ico ai-dikte.desktop ai-dikte-settings.desktop packaging LICENSE
+          cargo vendor --locked --manifest-path rust/Cargo.toml /tmp/vendor > /tmp/vendor-config.toml
+          tar -czf /tmp/rpmbuild/SOURCES/vendor.tar.gz -C /tmp vendor
+          curl --fail --location --show-error \
+            "https://github.com/Sporif/KWtype/archive/${KWTYPE_COMMIT}.tar.gz" \
+            --output "/tmp/rpmbuild/SOURCES/${KWTYPE_COMMIT}.tar.gz"
+          cp packaging/fedora/ai-dikte.spec packaging/fedora/kwtype.spec /tmp/rpmbuild/SPECS/
+          chown -R builder:builder /tmp/rpmbuild
+
+      - name: Build pinned KDE backend and application RPMs
+        run: |
+          # kwtype.spec verifies the pinned SHA256 before unpacking the source.
+          runuser -u builder -- rpmbuild --define '_topdir /tmp/rpmbuild' \
+            -bb /tmp/rpmbuild/SPECS/kwtype.spec
+          runuser -u builder -- rpmbuild --define '_topdir /tmp/rpmbuild' \
+            -bb /tmp/rpmbuild/SPECS/ai-dikte.spec
+          mkdir -p dist
+          cp /tmp/rpmbuild/RPMS/*/ai-dikte-0.5.0-*.rpm \
+            /tmp/rpmbuild/RPMS/*/kwtype-0.1.0-*.rpm dist/
+
+      - name: Install RPMs and smoke-test installed application
+        run: |
+          dnf -y install ./dist/*.rpm
+          cd /tmp
+          runuser -u builder -- /usr/bin/ai-dikte --version
+          runuser -u builder -- /usr/bin/ai-dikte --self-test
+
+      - name: Generate artifact checksums
+        working-directory: dist
+        run: sha256sum -- *.rpm > SHA256SUMS
+
+      - name: Upload Fedora RPMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-dikte-fedora-44-x86_64
+          path: |
+            dist/*.rpm
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7

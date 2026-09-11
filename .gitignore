@@ -1,0 +1,11 @@
+/target/
+/rust/target/
+/rust/settings.png
+/pkg/
+/src/
+/build/
+/dist/
+/vendor/
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.tar.gz

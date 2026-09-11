@@ -1,0 +1,40 @@
+name: Rust rewrite
+on:
+  pull_request:
+
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+      - name: Format
+        run: cargo +1.98.1 fmt --check
+      - name: Lint
+        run: cargo +1.98.1 clippy --locked --all-targets -- -D warnings
+      - name: Tests
+        run: cargo +1.98.1 test --locked
+      - name: Build development executable
+        run: cargo +1.98.1 build --locked --release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ai-dikte-rust-${{ matrix.os }}
+          path: |
+            rust/target/release/ai-dikte
+            rust/target/release/ai-dikte.exe
+          if-no-files-found: error
+          retention-days: 7
