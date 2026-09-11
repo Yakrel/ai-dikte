@@ -18,6 +18,106 @@ fn read_input() -> Result<Option<String>> {
     }
 }
 
+#[cfg(windows)]
+struct ConsoleEchoGuard {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    mode: u32,
+}
+
+#[cfg(windows)]
+impl Drop for ConsoleEchoGuard {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleMode(self.handle, self.mode);
+        }
+    }
+}
+
+#[cfg(unix)]
+struct TerminalEchoGuard {
+    fd: i32,
+    original: libc::termios,
+}
+
+#[cfg(unix)]
+impl Drop for TerminalEchoGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+/// Reads a secret without echoing it when stdin is an interactive terminal.
+/// Redirected stdin falls back to normal line input because there is no local
+/// terminal echo to suppress. If echo cannot be disabled on a real terminal,
+/// fail instead of risking printing a credential in clear text.
+#[cfg(windows)]
+fn read_secret() -> Result<Option<String>> {
+    use windows_sys::Win32::System::Console::{
+        ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+    };
+
+    let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    let mut original = 0;
+    if handle.is_null() || unsafe { GetConsoleMode(handle, &mut original) } == 0 {
+        return read_input();
+    }
+
+    if unsafe { SetConsoleMode(handle, original & !ENABLE_ECHO_INPUT) } == 0 {
+        bail!(
+            "Cannot disable console echo for API key input: {}",
+            io::Error::last_os_error()
+        );
+    }
+
+    let guard = ConsoleEchoGuard {
+        handle,
+        mode: original,
+    };
+    let result = read_input();
+    drop(guard);
+    println!();
+    result
+}
+
+#[cfg(unix)]
+fn read_secret() -> Result<Option<String>> {
+    let fd = libc::STDIN_FILENO;
+    if unsafe { libc::isatty(fd) } == 0 {
+        return read_input();
+    }
+
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
+        bail!(
+            "Cannot read terminal settings for API key input: {}",
+            io::Error::last_os_error()
+        );
+    }
+    let original = unsafe { original.assume_init() };
+    let mut hidden = unsafe { std::ptr::read(&original) };
+    hidden.c_lflag &= !(libc::ECHO | libc::ECHONL);
+
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &hidden) } != 0 {
+        bail!(
+            "Cannot disable terminal echo for API key input: {}",
+            io::Error::last_os_error()
+        );
+    }
+
+    let guard = TerminalEchoGuard { fd, original };
+    let result = read_input();
+    drop(guard);
+    println!();
+    result
+}
+
+#[cfg(not(any(unix, windows)))]
+fn read_secret() -> Result<Option<String>> {
+    read_input()
+}
+
 /// Explicit `ai-dikte setup` is a one-shot command. This is important for the
 /// Windows installer, which waits for setup to finish before continuing.
 pub fn setup() -> Result<()> {
@@ -64,9 +164,9 @@ fn configure_first_run() -> Result<()> {
     println!("-----------------------------------------------------");
 
     loop {
-        print!(" Gemini API Key: ");
+        print!(" Gemini API Key (hidden): ");
         io::stdout().flush()?;
-        let Some(key) = read_input()? else {
+        let Some(key) = read_secret()? else {
             bail!("Input closed before an API key was entered");
         };
         let key = key.trim();
@@ -196,10 +296,10 @@ fn update_api_key(config: &mut Config, path: &Path) -> Result<()> {
     let masked = mask_key(&current);
     println!(" Current Key: {masked}");
     println!(" (Press Enter without typing to keep the current key)");
-    print!(" New Gemini API Key: ");
+    print!(" New Gemini API Key (hidden): ");
     io::stdout().flush()?;
 
-    let Some(new_key) = read_input()? else {
+    let Some(new_key) = read_secret()? else {
         println!(" -> Input closed; no change made.");
         return Ok(());
     };
@@ -362,12 +462,10 @@ fn toggle_daemon(running: bool) -> Result<()> {
 }
 
 pub fn mask_key(key: &str) -> String {
-    if key.len() > 8 {
-        format!("{}...{}", &key[..4], &key[key.len() - 4..])
-    } else if !key.is_empty() {
-        "****".to_string()
-    } else {
+    if key.is_empty() {
         "Not configured".to_string()
+    } else {
+        "Configured (hidden)".to_string()
     }
 }
 
@@ -386,8 +484,8 @@ mod tests {
     #[test]
     fn test_mask_key() {
         assert_eq!(mask_key(""), "Not configured");
-        assert_eq!(mask_key("12345"), "****");
-        assert_eq!(mask_key("1234567890"), "1234...7890");
+        assert_eq!(mask_key("12345"), "Configured (hidden)");
+        assert_eq!(mask_key("1234567890"), "Configured (hidden)");
     }
 
     #[test]
