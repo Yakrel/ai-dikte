@@ -47,9 +47,12 @@ impl Drop for SocketGuard {
 pub fn running() -> Result<bool> {
     let dir = runtime_dir()?;
     let path = dir.join("daemon.lock");
+    lock_held(&path)
+}
+
+fn lock_held(path: &std::path::Path) -> Result<bool> {
     let lock = match OpenOptions::new()
         .read(true)
-        .write(true)
         .custom_flags(libc::O_NOFOLLOW)
         .open(path)
     {
@@ -57,7 +60,7 @@ pub fn running() -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e.into()),
     };
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
         return Ok(false);
     }
     let error = std::io::Error::last_os_error();
@@ -180,4 +183,29 @@ pub async fn daemon() -> Result<()> {
     quit.context("Cannot stop session worker")?;
     result?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_readers_do_not_look_like_a_running_daemon() {
+        let lock = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(
+            unsafe { libc::flock(lock.as_file().as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) },
+            0
+        );
+        assert!(!lock_held(lock.path()).unwrap());
+        assert_eq!(
+            unsafe { libc::flock(lock.as_file().as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        assert!(lock_held(lock.path()).unwrap());
+        assert_eq!(
+            unsafe { libc::flock(lock.as_file().as_raw_fd(), libc::LOCK_UN) },
+            0
+        );
+        assert!(!lock_held(lock.path()).unwrap());
+    }
 }

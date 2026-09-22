@@ -6,3 +6,6 @@
 *.cmd text eol=crlf
 *.vbs text eol=crlf
 *.ps1 text eol=crlf
+
+# Raw audio fixtures must remain byte-for-byte identical on every platform.
+*.pcm binary

@@ -29,6 +29,8 @@ On Windows, the installed `ai-dikte` command uses a small `.cmd` launcher so Pow
 
 If an API key is already stored, setup asks `Replace existing API key? [y/N]:`. Press Enter or answer `n` to keep it without rewriting it. Answer `y` to enter a replacement; the new key is saved only after successful verification. Canceling entry or failing verification leaves the previous key intact.
 
+Interrupting hidden API-key entry with Ctrl+C restores terminal echo and leaves the saved key unchanged.
+
 ---
 
 ### Linux (KDE Plasma & Hyprland / Omarchy)
@@ -118,6 +120,11 @@ ai-dikte
 - **Turkish Speech:** Voice recognition defaults to Turkish (`tr-TR`).
 - **Safe saves:** Changing the API key and then editing writing settings preserves the new key. Invalid existing configuration must be repaired before setup can overwrite it.
 - **Failure handling:** Recorder failures and unsettled transcription timeouts abort text insertion. Stopping the daemon cancels an active session; text already injected into another application cannot be rolled back.
+- **Accidental activation:** Empty recordings and audio classified locally as non-speech finish without waiting for Gemini's transcription timeout, including when connection setup is still pending. Speech detection is local; actual dictation is sent to Gemini. Detected speech retains the full finalization timeout so slow responses are not silently discarded.
+- **Exact Windows hotkey:** Only Win+Z starts a session; adding Ctrl, Alt, or Shift does not trigger dictation.
+- **Hyprland configuration:** Shortcut management preserves symlinks and leaves unchanged files untouched.
+
+The obsolete `audio_cue` setting has been removed. Before upgrading an existing configuration containing it, remove that property from `%APPDATA%\ai-dikte\config.json` on Windows or `$XDG_CONFIG_HOME/ai-dikte/config.json` (normally `~/.config/ai-dikte/config.json`) on Linux. Preserve the other settings and credentials. Unknown properties remain errors; configuration is never silently reset.
 
 ---
 
@@ -139,3 +146,25 @@ ai-dikte
 ## Architecture
 
 AI Dikte is built with pure Rust and zero heavy UI dependencies. Complete architectural decisions, invariants, and guidelines are documented in [AGENTS.md](AGENTS.md).
+
+Local speech detection uses the small, embedded [Earshot](https://docs.rs/earshot/) model in pure Rust. It processes 16 kHz mono audio without a separate runtime or model download. No detector can perfectly distinguish every noise from quiet speech; short and reduced-volume speech are covered by regressions.
+
+## Verification
+
+Run from `rust/`:
+
+```sh
+cargo test --locked
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+```
+
+Live tests are opt-in. Set `GEMINI_API_KEY` in the process environment, then run:
+
+```sh
+cargo test --locked --test live_api -- --ignored --nocapture --test-threads=1
+```
+
+They exercise authentication, accidental empty/noisy recordings, connected silence, and normal, quiet, and short speech. They stream generated PCM directly; they do not capture a microphone or type into another application. Live tests use network access and API quota, and recognition results can vary.
+
+The committed `rust/tests/fixtures/*.pcm` files are signed 16-bit little-endian, 16 kHz mono speech generated with FFmpeg's Flite `slt` voice: “Hello, this is a dictation test.” and “Hello.” They contain no user audio or credentials. Arch source manifests include these fixtures and the CLI integration tests; regenerate with `bash packaging/update-arch-sources.sh` after changing packaged files.

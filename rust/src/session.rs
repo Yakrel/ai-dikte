@@ -35,7 +35,7 @@ pub async fn run_cancellable(
 async fn collect_cancellable(
     stop: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<Result<()>>,
-    transcription: impl std::future::Future<Output = Result<String>>,
+    transcription: impl Future<Output = Result<String>>,
     stopped: oneshot::Receiver<()>,
     cancelled: &mut oneshot::Receiver<()>,
 ) -> Result<Option<String>> {
@@ -56,7 +56,7 @@ async fn collect_cancellable(
 async fn collect(
     stop: oneshot::Sender<()>,
     mut task: &mut Fuse<tokio::task::JoinHandle<Result<()>>>,
-    transcription: impl std::future::Future<Output = Result<String>>,
+    transcription: impl Future<Output = Result<String>>,
     stopped: oneshot::Receiver<()>,
 ) -> Result<String> {
     tokio::pin!(transcription);
@@ -65,7 +65,7 @@ async fn collect(
         _ = stopped => { let _ = stop.send(()); }
         result = &mut transcription => {
             let _ = stop.send(());
-            let _ = task.await;
+            task.await??;
             result?;
             anyhow::bail!("Transcription ended while recording was active");
         }
@@ -91,6 +91,30 @@ mod tests {
     use super::*;
     use std::time::Duration;
     #[tokio::test]
+    async fn early_no_speech_does_not_hide_recorder_failure() {
+        let (stop, stop_capture) = oneshot::channel();
+        let (_finish, stopped) = oneshot::channel();
+        let mut capture = tokio::spawn(async move {
+            let _ = stop_capture.await;
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe).into())
+        })
+        .fuse();
+        let error = collect(
+            stop,
+            &mut capture,
+            async { Err(crate::protocol::NoSpeech.into()) },
+            stopped,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::BrokenPipe)
+        );
+    }
+    #[tokio::test]
     async fn cancellation_releases_capture_without_returning_text() {
         for finishing in [false, true] {
             let (stop, stop_capture) = oneshot::channel();
@@ -100,15 +124,22 @@ mod tests {
             }
             let (cancel, mut cancelled) = oneshot::channel();
             let (released, cleanup) = oneshot::channel();
+            let (audio, receiver) = tokio::sync::mpsc::channel::<Result<Vec<u8>>>(1);
             let capture = tokio::spawn(async move {
                 let _ = stop_capture.await;
+                // Cancellation must release the live consumer before waiting
+                // for capture, including when normal draining already began.
+                audio.closed().await;
                 released.send(()).unwrap();
                 Ok(())
             });
             let operation = collect_cancellable(
                 stop,
                 capture,
-                std::future::pending(),
+                async move {
+                    let _receiver = receiver;
+                    std::future::pending().await
+                },
                 stopped,
                 &mut cancelled,
             );
@@ -147,6 +178,31 @@ mod tests {
         .await
         .unwrap();
         assert!(result.unwrap().is_none());
+    }
+    #[tokio::test]
+    async fn cancellation_preserves_real_recorder_failures() {
+        let (stop, stop_capture) = oneshot::channel();
+        let (_finish, stopped) = oneshot::channel();
+        let (cancel, mut cancelled) = oneshot::channel();
+        let capture = tokio::spawn(async move {
+            let _ = stop_capture.await;
+            anyhow::bail!("device disconnected");
+        });
+        cancel.send(()).unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            collect_cancellable(
+                stop,
+                capture,
+                std::future::pending(),
+                stopped,
+                &mut cancelled,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.to_string(), "device disconnected");
     }
     #[tokio::test]
     async fn immediate_stop_drains_capture_before_returning_text() {

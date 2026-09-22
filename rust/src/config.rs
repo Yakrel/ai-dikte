@@ -27,7 +27,6 @@ pub struct Config {
     pub language: String,
     pub mode: Mode,
     pub custom_vocabulary: Vec<String>,
-    pub audio_cue: bool,
     pub notify_mode: Notifications,
     pub input_device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,7 +38,6 @@ impl Default for Config {
             language: "tr-TR".into(),
             mode: Mode::Smart,
             custom_vocabulary: vec![],
-            audio_cue: false,
             notify_mode: Notifications::All,
             input_device: None,
             api_key: None,
@@ -204,7 +202,7 @@ mod tests {
     #[test]
     fn rejects_invalid_types_and_unknown_settings() {
         for input in [
-            r#"{"audio_cue":"false"}"#,
+            r#"{"audio_cue":false}"#,
             r#"{"mode":"unknown"}"#,
             r#"{"input_device":-1}"#,
             r#"{"fallback":true}"#,

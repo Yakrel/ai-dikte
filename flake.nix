@@ -50,7 +50,7 @@
       source = lib.fileset.toSource {
         root = ./.;
         fileset = lib.fileset.unions [
-          ./rust/Cargo.toml ./rust/Cargo.lock ./rust/build.rs ./rust/src
+          ./rust/Cargo.toml ./rust/Cargo.lock ./rust/build.rs ./rust/src ./rust/tests
           ./ai-dikte-toggle ./ai-dikte.desktop ./ai-dikte-settings.desktop
           ./ai-dikte.png ./ai-dikte.ico ./LICENSE ./packaging/linux
         ];

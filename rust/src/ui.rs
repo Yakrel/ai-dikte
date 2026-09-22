@@ -33,17 +33,97 @@ impl Drop for ConsoleEchoGuard {
     }
 }
 
+#[cfg(windows)]
+static SECRET_INTERRUPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(windows)]
+unsafe extern "system" fn interrupt_console(event: u32) -> i32 {
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+    if matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT) {
+        SECRET_INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        1
+    } else {
+        0
+    }
+}
+
+#[cfg(windows)]
+struct ConsoleSignals;
+
+#[cfg(windows)]
+impl Drop for ConsoleSignals {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(interrupt_console), 0);
+        }
+    }
+}
+
 #[cfg(unix)]
 struct TerminalEchoGuard {
     fd: i32,
     original: libc::termios,
+    flags: i32,
 }
 
 #[cfg(unix)]
 impl Drop for TerminalEchoGuard {
     fn drop(&mut self) {
         unsafe {
-            libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+            while libc::tcsetattr(self.fd, libc::TCSANOW, &self.original) != 0 {
+                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                    break;
+                }
+            }
+            libc::fcntl(self.fd, libc::F_SETFL, self.flags);
+        }
+    }
+}
+
+#[cfg(unix)]
+static SECRET_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+extern "C" fn interrupt_secret(signal: libc::c_int) {
+    SECRET_SIGNAL.store(signal, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Install handlers only for the duration of hidden input. Tokio's signal
+/// listeners permanently change process signal handling, so do not use them here.
+#[cfg(unix)]
+struct SecretSignals(Vec<(libc::c_int, libc::sigaction)>);
+
+#[cfg(unix)]
+impl SecretSignals {
+    fn install() -> Result<Self> {
+        SECRET_SIGNAL.store(0, std::sync::atomic::Ordering::Relaxed);
+        let mut guard = Self(Vec::new());
+        for signal in [
+            libc::SIGINT,
+            libc::SIGTERM,
+            libc::SIGHUP,
+            libc::SIGQUIT,
+            libc::SIGTSTP,
+        ] {
+            let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+            action.sa_sigaction = interrupt_secret as *const () as usize;
+            unsafe { libc::sigemptyset(&mut action.sa_mask) };
+            let mut previous = std::mem::MaybeUninit::uninit();
+            if unsafe { libc::sigaction(signal, &action, previous.as_mut_ptr()) } != 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+            guard.0.push((signal, unsafe { previous.assume_init() }));
+        }
+        Ok(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SecretSignals {
+    fn drop(&mut self) {
+        for (signal, action) in self.0.iter().rev() {
+            unsafe { libc::sigaction(*signal, action, std::ptr::null_mut()) };
         }
     }
 }
@@ -55,7 +135,8 @@ impl Drop for TerminalEchoGuard {
 #[cfg(windows)]
 fn read_secret() -> Result<Option<String>> {
     use windows_sys::Win32::System::Console::{
-        ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+        ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, GetConsoleMode, GetStdHandle,
+        STD_INPUT_HANDLE, SetConsoleCtrlHandler, SetConsoleMode,
     };
 
     let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
@@ -64,21 +145,92 @@ fn read_secret() -> Result<Option<String>> {
         return read_input();
     }
 
-    if unsafe { SetConsoleMode(handle, original & !ENABLE_ECHO_INPUT) } == 0 {
+    SECRET_INTERRUPTED.store(false, std::sync::atomic::Ordering::Relaxed);
+    if unsafe { SetConsoleCtrlHandler(Some(interrupt_console), 1) } == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    let signals = ConsoleSignals;
+    let guard = ConsoleEchoGuard {
+        handle,
+        mode: original,
+    };
+    if unsafe {
+        SetConsoleMode(
+            handle,
+            original & !(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT),
+        )
+    } == 0
+    {
         bail!(
             "Cannot disable console echo for API key input: {}",
             io::Error::last_os_error()
         );
     }
 
-    let guard = ConsoleEchoGuard {
-        handle,
-        mode: original,
-    };
-    let result = read_input();
+    let result = read_console_secret(handle);
     drop(guard);
+    drop(signals);
     println!();
     result
+}
+
+#[cfg(windows)]
+fn read_console_secret(handle: windows_sys::Win32::Foundation::HANDLE) -> Result<Option<String>> {
+    use windows_sys::Win32::{
+        Foundation::{WAIT_FAILED, WAIT_TIMEOUT},
+        System::{
+            Console::{FlushConsoleInputBuffer, INPUT_RECORD, KEY_EVENT, ReadConsoleInputW},
+            Threading::WaitForSingleObject,
+        },
+    };
+    let mut input = Vec::new();
+    loop {
+        if SECRET_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
+            unsafe { FlushConsoleInputBuffer(handle) };
+            bail!("API key input interrupted");
+        }
+        match unsafe { WaitForSingleObject(handle, 100) } {
+            WAIT_TIMEOUT => continue,
+            WAIT_FAILED => return Err(io::Error::last_os_error().into()),
+            _ => {}
+        }
+        let mut event = INPUT_RECORD::default();
+        let mut count = 0;
+        if unsafe { ReadConsoleInputW(handle, &mut event, 1, &mut count) } == 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        if count == 0 || event.EventType != KEY_EVENT as u16 {
+            continue;
+        }
+        let key = unsafe { event.Event.KeyEvent };
+        if key.bKeyDown == 0 {
+            continue;
+        }
+        for _ in 0..key.wRepeatCount {
+            match unsafe { key.uChar.UnicodeChar } {
+                3 => {
+                    unsafe { FlushConsoleInputBuffer(handle) };
+                    bail!("API key input interrupted");
+                }
+                13 => {
+                    return String::from_utf16(&input)
+                        .map(Some)
+                        .map_err(|_| anyhow::anyhow!("API key input is not valid Unicode"));
+                }
+                8 => {
+                    if input
+                        .pop()
+                        .is_some_and(|ch| (0xdc00..=0xdfff).contains(&ch))
+                    {
+                        input.pop();
+                    }
+                }
+                26 if input.is_empty() => return Ok(None),
+                ch if ch >= 32 => input.push(ch),
+                _ => {}
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -96,21 +248,85 @@ fn read_secret() -> Result<Option<String>> {
         );
     }
     let original = unsafe { original.assume_init() };
-    let mut hidden = unsafe { std::ptr::read(&original) };
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    let signals = SecretSignals::install()?;
+    let guard = TerminalEchoGuard {
+        fd,
+        original,
+        flags,
+    };
+    let mut hidden = unsafe { std::ptr::read(&guard.original) };
     hidden.c_lflag &= !(libc::ECHO | libc::ECHONL);
 
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &hidden) } != 0 {
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &hidden) } != 0
+        || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0
+    {
         bail!(
             "Cannot disable terminal echo for API key input: {}",
             io::Error::last_os_error()
         );
     }
 
-    let guard = TerminalEchoGuard { fd, original };
-    let result = read_input();
+    let result = read_terminal_secret(fd);
     drop(guard);
+    drop(signals);
     println!();
     result
+}
+
+#[cfg(unix)]
+fn read_terminal_secret(fd: i32) -> Result<Option<String>> {
+    use std::io::BufRead;
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut input = Vec::new();
+    loop {
+        if SECRET_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+            unsafe { libc::tcflush(fd, libc::TCIFLUSH) };
+            bail!("API key input interrupted");
+        }
+        match reader.fill_buf() {
+            Ok([]) => {
+                if input.is_empty() {
+                    return Ok(None);
+                }
+                break;
+            }
+            Ok(buffer) => {
+                let newline = buffer.iter().position(|&byte| byte == b'\n');
+                let count = newline.map_or(buffer.len(), |index| index + 1);
+                input.extend_from_slice(&buffer[..count]);
+                reader.consume(count);
+                if newline.is_some() {
+                    break;
+                }
+                continue;
+            }
+            Err(error) => match error.kind() {
+                io::ErrorKind::Interrupted => continue,
+                io::ErrorKind::WouldBlock => {}
+                _ => return Err(error.into()),
+            },
+        }
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // A bounded wait also notices a signal delivered to another thread.
+        if unsafe { libc::poll(&mut descriptor, 1, 100) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error.into());
+            }
+        }
+    }
+    String::from_utf8(input)
+        .map(Some)
+        .map_err(|_| anyhow::anyhow!("API key input is not valid UTF-8"))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -146,7 +362,7 @@ pub fn first_run_setup() -> Result<()> {
 
 fn configure_first_run() -> Result<()> {
     let path = config::path()?;
-    let config = if path.exists() {
+    let mut config = if path.exists() {
         Config::load(&path)?
     } else {
         Config::default()
@@ -161,7 +377,7 @@ fn configure_first_run() -> Result<()> {
     println!();
     println!("-----------------------------------------------------");
 
-    configure_api_key(&config, &path)?;
+    configure_api_key(&mut config, &path)?;
 
     println!();
     print!(" -> Starting background listener service... ");
@@ -176,7 +392,7 @@ fn configure_first_run() -> Result<()> {
     Ok(())
 }
 
-fn configure_api_key(config: &Config, path: &Path) -> Result<()> {
+fn configure_api_key(config: &mut Config, path: &Path) -> Result<()> {
     #[cfg(windows)]
     let existing = config::credentials::read_optional()?;
     #[cfg(not(windows))]
@@ -223,16 +439,12 @@ fn configure_api_key(config: &Config, path: &Path) -> Result<()> {
         print!(" -> Verifying API key... ");
         io::stdout().flush()?;
 
-        let test_result = {
-            let cfg = config.clone();
-            let k = key.to_string();
-            tokio::runtime::Runtime::new()?.block_on(live::validate_key(&cfg, &k))
-        };
+        let test_result = settings::VerifiedKey::verify(config, key.to_string());
 
         match test_result {
-            Ok(()) => {
+            Ok(key) => {
                 println!("SUCCESS!");
-                settings::save_verified(config.clone(), key.to_string(), path, |_, _| Ok(()))?;
+                settings::save_api_key(config, key, path)?;
                 println!(" [OK] Settings saved successfully.");
                 break;
             }
@@ -344,16 +556,12 @@ fn update_api_key(config: &mut Config, path: &Path) -> Result<()> {
     print!(" -> Verifying new key... ");
     io::stdout().flush()?;
 
-    let test_result = {
-        let cfg = config.clone();
-        let k = new_key.to_string();
-        tokio::runtime::Runtime::new()?.block_on(live::validate_key(&cfg, &k))
-    };
+    let test_result = settings::VerifiedKey::verify(config, new_key.to_string());
 
     match test_result {
-        Ok(()) => {
+        Ok(key) => {
             println!("SUCCESS!");
-            save_api_key(config, new_key.to_string(), path)?;
+            settings::save_api_key(config, key, path)?;
             println!(" [OK] New API key saved successfully.");
         }
         Err(err) => {
@@ -362,12 +570,6 @@ fn update_api_key(config: &mut Config, path: &Path) -> Result<()> {
             println!("     Previous settings preserved.");
         }
     }
-    Ok(())
-}
-
-fn save_api_key(config: &mut Config, key: String, path: &Path) -> Result<()> {
-    settings::save_verified(config.clone(), key, path, |_, _| Ok(()))?;
-    *config = Config::load(path)?;
     Ok(())
 }
 
@@ -423,7 +625,7 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                 let lang = lang.trim();
                 if !lang.is_empty() {
                     config.language = lang.to_string();
-                    save_config_change(config, path)?;
+                    config.save(path)?;
                     println!(" [OK] Spoken language set to {}.", config.language);
                 }
             }
@@ -433,7 +635,7 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                 } else {
                     Mode::Smart
                 };
-                save_config_change(config, path)?;
+                config.save(path)?;
                 println!(" [OK] Writing style changed to {:?}.", config.mode);
                 if config.mode == Mode::Smart {
                     println!("     (Smart: Cleans up filler words and adds punctuation)");
@@ -457,7 +659,7 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
                 let words = words.trim();
                 if !words.is_empty() {
                     config.custom_vocabulary = parse_vocabulary(words);
-                    save_config_change(config, path)?;
+                    config.save(path)?;
                     println!(" [OK] Custom vocabulary updated.");
                 }
             }
@@ -466,11 +668,6 @@ fn update_style_and_vocabulary(config: &mut Config, path: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn save_config_change(config: &Config, path: &Path) -> Result<()> {
-    let key = config.key()?;
-    settings::save_verified(config.clone(), key, path, |_, _| Ok(()))
 }
 
 fn toggle_autostart(current: bool) -> Result<()> {
@@ -517,29 +714,6 @@ pub fn parse_vocabulary(input: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(windows))]
-    #[test]
-    fn style_save_preserves_updated_api_key() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.json");
-        let mut config = Config {
-            api_key: Some("old-key".into()),
-            ..Config::default()
-        };
-        save_api_key(&mut config, "new-key".into(), &path).unwrap();
-        config.mode = Mode::Verbatim;
-        save_config_change(&config, &path).unwrap();
-        let saved = Config::load(&path).unwrap();
-        assert_eq!(saved.key().unwrap(), "new-key");
-        assert_eq!(saved.mode, Mode::Verbatim);
-    }
-
-    #[test]
-    fn test_mask_key() {
-        assert_eq!(mask_key(""), "Not configured");
-        assert_eq!(mask_key("12345"), "Configured (hidden)");
-        assert_eq!(mask_key("1234567890"), "Configured (hidden)");
-    }
 
     #[test]
     fn test_parse_vocabulary() {

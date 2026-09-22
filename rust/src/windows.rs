@@ -57,10 +57,16 @@ enum ChordAction {
     Toggle,
 }
 
-fn chord_event(active: &mut bool, down: bool, up: bool, win: bool) -> ChordAction {
+fn chord_event(
+    active: &mut bool,
+    down: bool,
+    up: bool,
+    win: bool,
+    extra_modifiers: bool,
+) -> ChordAction {
     if down && *active {
         ChordAction::Consume
-    } else if down && win {
+    } else if down && win && !extra_modifiers {
         *active = true;
         ChordAction::Toggle
     } else if up && *active {
@@ -80,9 +86,12 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let up = wp == WM_KEYUP as usize || wp == WM_SYSKEYUP as usize;
                 let win =
                     GetAsyncKeyState(VK_LWIN as i32) < 0 || GetAsyncKeyState(VK_RWIN as i32) < 0;
+                let extra_modifiers = GetAsyncKeyState(VK_CONTROL as i32) < 0
+                    || GetAsyncKeyState(VK_MENU as i32) < 0
+                    || GetAsyncKeyState(VK_SHIFT as i32) < 0;
                 let action = CHORD.with(|chord| {
                     let mut active = chord.get();
-                    let action = chord_event(&mut active, down, up, win);
+                    let action = chord_event(&mut active, down, up, win, extra_modifiers);
                     chord.set(active);
                     action
                 });
@@ -671,30 +680,69 @@ mod tests {
     fn win_released_before_z_does_not_leak_repeat_or_toggle_twice() {
         let mut active = false;
         assert_eq!(
-            chord_event(&mut active, true, false, true),
+            chord_event(&mut active, true, false, true, false),
             ChordAction::Toggle
         );
         for win in [true, false, false] {
             assert_eq!(
-                chord_event(&mut active, true, false, win),
+                chord_event(&mut active, true, false, win, false),
                 ChordAction::Consume
             );
         }
         assert_eq!(
-            chord_event(&mut active, false, true, false),
+            chord_event(&mut active, false, true, false, false),
             ChordAction::Consume
         );
         assert_eq!(
-            chord_event(&mut active, true, false, false),
+            chord_event(&mut active, true, false, false, false),
             ChordAction::Pass
         );
         assert_eq!(
-            chord_event(&mut active, false, true, false),
+            chord_event(&mut active, false, true, false, false),
             ChordAction::Pass
         );
         assert_eq!(
-            chord_event(&mut active, true, false, true),
+            chord_event(&mut active, true, false, true, false),
             ChordAction::Toggle
+        );
+    }
+
+    #[test]
+    fn modified_win_z_passes_through_without_activating() {
+        let mut active = false;
+        assert_eq!(
+            chord_event(&mut active, true, false, true, true),
+            ChordAction::Pass
+        );
+        assert!(!active);
+        assert_eq!(
+            chord_event(&mut active, false, true, true, true),
+            ChordAction::Pass
+        );
+        assert_eq!(
+            chord_event(&mut active, true, false, true, false),
+            ChordAction::Toggle
+        );
+    }
+
+    #[test]
+    fn modifiers_pressed_during_active_chord_do_not_leak_repeat_or_release() {
+        let mut active = false;
+        assert_eq!(
+            chord_event(&mut active, true, false, true, false),
+            ChordAction::Toggle
+        );
+        assert_eq!(
+            chord_event(&mut active, true, false, true, true),
+            ChordAction::Consume
+        );
+        assert_eq!(
+            chord_event(&mut active, false, true, false, true),
+            ChordAction::Consume
+        );
+        assert_eq!(
+            chord_event(&mut active, true, false, true, true),
+            ChordAction::Pass
         );
     }
 }

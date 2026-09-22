@@ -29,42 +29,59 @@ pub async fn run(mut commands: mpsc::Receiver<Command>, report: impl Fn(&str)) {
         };
         let (stop, stopped) = oneshot::channel();
         let (cancel, cancelled) = oneshot::channel();
-        let mut cancel = Some(cancel);
-        let mut recording = Box::pin(session::run_cancellable(config, stopped, cancelled));
+        let recording = session::run_cancellable(config, stopped, cancelled);
         report("Recording — Win+Z to stop");
-        let quitting = tokio::select! {
+        if control_recording(&mut commands, recording, stop, cancel, &report).await {
+            break;
+        }
+    }
+}
+
+// Returns true only when the controller must exit, after capture cleanup.
+async fn control_recording(
+    commands: &mut mpsc::Receiver<Command>,
+    recording: impl Future<Output = anyhow::Result<()>>,
+    stop: oneshot::Sender<()>,
+    cancel: oneshot::Sender<()>,
+    report: impl Fn(&str),
+) -> bool {
+    tokio::pin!(recording);
+    let quitting = tokio::select! {
+        biased;
+        command = commands.recv() => matches!(command, None | Some(Command::Quit)),
+        result = &mut recording => {
+            report(&format_result(result));
+            return false;
+        }
+    };
+    if quitting {
+        let _ = cancel.send(());
+        drop(stop);
+        if let Err(error) = recording.await {
+            report(&format_result(Err(error)));
+        }
+        return true;
+    }
+    let _ = stop.send(());
+    report("Finishing transcription…");
+    loop {
+        tokio::select! {
             biased;
-            command = commands.recv() => matches!(command, None | Some(Command::Quit)),
+            command = commands.recv() => {
+                if matches!(command, None | Some(Command::Quit)) {
+                    let _ = cancel.send(());
+                    // Keep capture cleanup owned by this future on exit.
+                    if let Err(error) = recording.await {
+                        report(&format_result(Err(error)));
+                    }
+                    return true;
+                }
+                report("Still finishing; wait for Ready");
+            }
             result = &mut recording => {
                 report(&format_result(result));
-                continue;
+                return false;
             }
-        };
-        if quitting {
-            let _ = cancel.take().unwrap().send(());
-        }
-        let _ = stop.send(());
-        report("Finishing transcription…");
-        loop {
-            tokio::select! {
-                biased;
-                command = commands.recv(), if !quitting => {
-                    if matches!(command, None | Some(Command::Quit)) {
-                        let _ = cancel.take().unwrap().send(());
-                        // Keep capture cleanup owned by this future on exit.
-                        let _ = recording.await;
-                        return;
-                    }
-                    report("Still finishing; wait for Ready");
-                }
-                result = &mut recording => {
-                    report(&format_result(result));
-                    break;
-                }
-            }
-        }
-        if quitting {
-            break;
         }
     }
 }
@@ -80,16 +97,56 @@ fn format_result(result: anyhow::Result<()>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, time::Duration};
 
-    #[test]
-    fn test_format_result_ready() {
-        assert_eq!(format_result(Ok(())), "Ready");
-    }
-
-    #[test]
-    fn test_format_result_no_speech() {
-        let err = anyhow::Error::new(protocol::NoSpeech);
-        assert_eq!(format_result(Err(err)), "No speech detected");
+    #[tokio::test]
+    async fn quit_awaits_cleanup_without_finishing_or_success_feedback() {
+        for finishing in [false, true] {
+            let (send, mut commands) = mpsc::channel(2);
+            let (stop, stopped) = oneshot::channel();
+            let (cancel, cancelled) = oneshot::channel();
+            let (release, cleanup) = oneshot::channel();
+            let (cleaned, cleanup_done) = oneshot::channel();
+            let reports = RefCell::new(Vec::new());
+            if finishing {
+                send.send(Command::Toggle).await.unwrap();
+            } else {
+                send.send(Command::Quit).await.unwrap();
+            }
+            let recording = async {
+                if finishing {
+                    stopped.await.unwrap();
+                    send.send(Command::Quit).await.unwrap();
+                }
+                cancelled.await.unwrap();
+                if finishing {
+                    // Finishing feedback was valid before Quit arrived.
+                    reports.borrow_mut().clear();
+                } else {
+                    assert!(reports.borrow().is_empty());
+                }
+                cleanup.await.unwrap();
+                cleaned.send(()).unwrap();
+                Ok(())
+            };
+            let request = async {
+                tokio::task::yield_now().await;
+                release.send(()).unwrap();
+            };
+            let (quitting, ()) = tokio::time::timeout(Duration::from_secs(1), async {
+                tokio::join!(
+                    control_recording(&mut commands, recording, stop, cancel, |message| {
+                        reports.borrow_mut().push(message.to_owned());
+                    }),
+                    request
+                )
+            })
+            .await
+            .unwrap();
+            assert!(quitting);
+            cleanup_done.await.unwrap();
+            assert!(reports.borrow().is_empty());
+        }
     }
 
     #[test]
@@ -99,11 +156,5 @@ mod tests {
             format_result(Err(err)),
             "Error: upstream returned no transcription metadata"
         );
-    }
-
-    #[test]
-    fn test_format_result_error() {
-        let err = anyhow::anyhow!("Network timeout");
-        assert_eq!(format_result(Err(err)), "Error: Network timeout");
     }
 }

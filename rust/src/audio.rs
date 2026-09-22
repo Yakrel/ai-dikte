@@ -7,6 +7,21 @@ pub struct Capture {
     pub stop: oneshot::Sender<()>,
     pub task: tokio::task::JoinHandle<Result<()>>,
 }
+
+// A closed consumer requests cleanup, not a capture failure. A full queue still
+// means audio was lost and must prevent a successful transcription.
+fn try_send_audio(tx: &mpsc::Sender<Result<Vec<u8>>>, bytes: Vec<u8>) -> Result<bool> {
+    if bytes.is_empty() {
+        return Ok(!tx.is_closed());
+    }
+    match tx.try_send(Ok(bytes)) {
+        Ok(()) => Ok(true),
+        Err(mpsc::error::TrySendError::Closed(_)) => Ok(false),
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            anyhow::bail!("Audio buffer overflow; recording aborted")
+        }
+    }
+}
 #[cfg(not(windows))]
 pub fn start(config: &Config) -> Result<Capture> {
     use anyhow::Context;
@@ -48,8 +63,8 @@ pub fn start(config: &Config) -> Result<Capture> {
             if !bytes.len().is_multiple_of(2) {
                 pending_byte = bytes.pop();
             }
-            if !bytes.is_empty() && tx.try_send(Ok(bytes)).is_err() {
-                anyhow::bail!("Audio buffer overflow or consumer stopped; recording aborted");
+            if !try_send_audio(&tx, bytes)? {
+                break;
             }
         }
         // SIGINT asks PipeWire to flush its final samples. Drain concurrently,
@@ -74,7 +89,9 @@ pub fn start(config: &Config) -> Result<Capture> {
                     pending_byte = bytes.pop();
                 }
                 if !bytes.is_empty() {
-                    tx.send(Ok(bytes)).await.context("Audio consumer stopped")?;
+                    // Cancellation drops the consumer, but we must still drain
+                    // and inspect the recorder's exit status and PCM tail.
+                    let _ = tx.send(Ok(bytes)).await;
                 }
             }
             let status = child.wait().await?;
@@ -116,7 +133,7 @@ pub fn start(config: &Config) -> Result<Capture> {
         let mut pcm = Pcm16::new(rate, channels)?;
         let mut emit = move |samples: &[f32]| {
             let bytes = pcm.convert(samples);
-            if !bytes.is_empty() && tx.try_send(Ok(bytes)).is_err() {
+            if try_send_audio(&tx, bytes).is_err() {
                 overflow.store(true, Ordering::Release);
             }
         };
@@ -248,6 +265,22 @@ pub fn select_device(name: Option<&str>) -> Result<cpal::Device> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn closing_consumer_during_capture_is_not_an_overflow() {
+        let (tx, mut audio) = mpsc::channel(1);
+        try_send_audio(&tx, vec![1, 0]).unwrap();
+        audio.close();
+        assert!(!try_send_audio(&tx, vec![2, 0]).unwrap());
+        assert_eq!(audio.recv().await.unwrap().unwrap(), vec![1, 0]);
+    }
+
+    #[test]
+    fn full_audio_buffer_is_a_capture_failure() {
+        let (tx, _audio) = mpsc::channel(1);
+        try_send_audio(&tx, vec![1, 0]).unwrap();
+        assert!(try_send_audio(&tx, vec![2, 0]).is_err());
+    }
     #[test]
     fn resampling_keeps_exact_duration_across_callbacks() {
         for rate in [16000, 44100, 48000] {

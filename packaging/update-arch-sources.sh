@@ -2,7 +2,7 @@
 # Regenerate local source checksums after changing Rust or packaged assets.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mapfile -t sources < <(find rust/src -type f -name '*.rs' | LC_ALL=C sort)
+mapfile -t sources < <(find rust/src rust/tests -type f \( -name '*.rs' -o -name '*.pcm' \) | LC_ALL=C sort)
 sources=(rust/Cargo.toml rust/Cargo.lock rust/build.rs "${sources[@]}" ai-dikte.png ai-dikte.ico ai-dikte-toggle ai-dikte.desktop ai-dikte-settings.desktop packaging/install-linux.sh packaging/linux/ai-dikte.service LICENSE)
 sed '/^# BEGIN GENERATED SOURCES/,$d' PKGBUILD > PKGBUILD.tmp
 {

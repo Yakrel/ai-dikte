@@ -84,9 +84,6 @@ impl Transcript {
         }
         Ok(())
     }
-    pub fn has_text(&self) -> bool {
-        self.pending_interim || !self.segments.is_empty()
-    }
     pub fn ready(&self, now: Duration, stopped_at: Duration) -> bool {
         !self.pending_interim
             && (self.complete || !self.segments.is_empty())

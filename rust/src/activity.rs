@@ -1,18 +1,26 @@
-//! Conservative local signal meter used only to short-circuit obvious silence.
-//!
-//! This is intentionally not a general-purpose VAD. Ambiguous or noisy audio is
-//! always sent through the normal Gemini finalization path so quiet speech is not
-//! discarded by a local heuristic.
+//! Local speech detection at the wire's 16 kHz mono PCM rate.
+//! Use the detector's standard speech threshold; never impose a minimum utterance length.
 use anyhow::{Result, bail};
 
-const RMS_SILENCE_THRESHOLD: f64 = 0.0032; // roughly -50 dBFS
-const PEAK_SILENCE_THRESHOLD: f64 = 0.010; // -40 dBFS
+const FRAME_SAMPLES: usize = 256;
+const SPEECH_THRESHOLD: f32 = 0.5;
 
-#[derive(Debug, Default)]
 pub struct AudioActivity {
-    samples: u64,
-    sum_squares: f64,
-    peak: f64,
+    detector: earshot::Detector<earshot::DefaultPredictor>,
+    frame: [i16; FRAME_SAMPLES],
+    filled: usize,
+    speech: bool,
+}
+
+impl Default for AudioActivity {
+    fn default() -> Self {
+        Self {
+            detector: earshot::Detector::default(),
+            frame: [0; FRAME_SAMPLES],
+            filled: 0,
+            speech: false,
+        }
+    }
 }
 
 impl AudioActivity {
@@ -20,25 +28,31 @@ impl AudioActivity {
         if !bytes.len().is_multiple_of(2) {
             bail!("Audio must contain complete signed 16-bit PCM samples");
         }
-
+        if self.speech {
+            return Ok(());
+        }
         for sample in bytes.as_chunks::<2>().0 {
-            let value = i16::from_le_bytes(*sample) as f64 / 32768.0;
-            self.samples += 1;
-            self.sum_squares += value * value;
-            self.peak = self.peak.max(value.abs());
+            self.frame[self.filled] = i16::from_le_bytes(*sample);
+            self.filled += 1;
+            if self.filled == FRAME_SAMPLES {
+                self.filled = 0;
+                if self.detector.predict_i16(&self.frame) >= SPEECH_THRESHOLD {
+                    self.speech = true;
+                    break;
+                }
+            }
         }
         Ok(())
     }
 
-    /// Returns true only for a confidently silent signal. Anything near the
-    /// threshold is deliberately treated as possible speech and finalized by
-    /// Gemini instead.
-    pub fn clearly_silent(&self) -> bool {
-        if self.samples == 0 {
-            return false;
+    /// Finalize only after capture ends; zero-pad the last incomplete VAD frame.
+    pub fn clearly_silent(&mut self) -> bool {
+        if !self.speech && self.filled != 0 {
+            self.frame[self.filled..].fill(0);
+            self.speech = self.detector.predict_i16(&self.frame) >= SPEECH_THRESHOLD;
+            self.filled = 0;
         }
-        let rms = (self.sum_squares / self.samples as f64).sqrt();
-        rms <= RMS_SILENCE_THRESHOLD && self.peak <= PEAK_SILENCE_THRESHOLD
+        !self.speech
     }
 }
 
@@ -46,64 +60,53 @@ impl AudioActivity {
 mod tests {
     use super::*;
 
-    fn pcm(samples: impl IntoIterator<Item = i16>) -> Vec<u8> {
-        samples
-            .into_iter()
-            .flat_map(i16::to_le_bytes)
-            .collect::<Vec<_>>()
+    #[test]
+    fn empty_silence_and_short_microphone_noise_are_not_speech() {
+        for pcm in [Vec::new(), vec![0; 3200], noise()] {
+            let mut activity = AudioActivity::default();
+            activity.observe_pcm16(&pcm).unwrap();
+            assert!(activity.clearly_silent());
+        }
+    }
+
+    fn noise() -> Vec<u8> {
+        let mut state = 42_u32;
+        (0..1600)
+            .flat_map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                ((state >> 16) as i16 / 100).to_le_bytes()
+            })
+            .collect()
     }
 
     #[test]
-    fn one_second_of_digital_silence_is_detected_locally() {
-        let mut activity = AudioActivity::default();
-        activity.observe_pcm16(&pcm(vec![0; 16_000])).unwrap();
-        assert!(activity.clearly_silent());
-    }
-
-    #[test]
-    fn low_level_microphone_floor_is_detected_as_silence() {
-        let mut activity = AudioActivity::default();
-        let samples = (0..16_000).map(|index| if index % 2 == 0 { 64 } else { -64 });
-        activity.observe_pcm16(&pcm(samples)).unwrap();
-        assert!(activity.clearly_silent());
-    }
-
-    #[test]
-    fn quiet_speech_like_peak_falls_back_to_remote_finalization() {
-        let mut activity = AudioActivity::default();
-        let mut samples = vec![0; 16_000];
-        samples[8_000] = 400;
-        activity.observe_pcm16(&pcm(samples)).unwrap();
-        assert!(!activity.clearly_silent());
-    }
-
-    #[test]
-    fn speech_like_burst_is_never_short_circuited() {
-        let mut activity = AudioActivity::default();
-        let samples = (0..16_000).map(|index| {
-            if (4_000..5_600).contains(&index) {
-                if index % 2 == 0 { 2_000 } else { -2_000 }
-            } else {
-                0
+    fn real_speech_survives_quiet_levels_and_chunk_boundaries() {
+        let original: &[u8] = include_bytes!("../tests/fixtures/speech.pcm");
+        let short: &[u8] = include_bytes!("../tests/fixtures/short-speech.pcm");
+        for (divisor, samples) in [(1, original), (16, original), (16, short)] {
+            let pcm: Vec<_> = samples
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .flat_map(|sample| (i16::from_le_bytes(*sample) / divisor).to_le_bytes())
+                .collect();
+            let mut activity = AudioActivity::default();
+            for chunk in pcm.chunks(314) {
+                activity.observe_pcm16(chunk).unwrap();
             }
-        });
-        activity.observe_pcm16(&pcm(samples)).unwrap();
-        assert!(!activity.clearly_silent());
+            assert!(
+                !activity.clearly_silent(),
+                "speech at 1/{divisor} volume lost"
+            );
+        }
     }
 
     #[test]
-    fn transient_peak_falls_back_to_remote_finalization() {
+    fn malformed_pcm_is_rejected_even_after_speech() {
         let mut activity = AudioActivity::default();
-        let mut samples = vec![0; 16_000];
-        samples[8_000] = 1_000;
-        activity.observe_pcm16(&pcm(samples)).unwrap();
-        assert!(!activity.clearly_silent());
-    }
-
-    #[test]
-    fn malformed_pcm_is_rejected() {
-        let mut activity = AudioActivity::default();
+        activity
+            .observe_pcm16(include_bytes!("../tests/fixtures/speech.pcm"))
+            .unwrap();
         assert!(activity.observe_pcm16(&[1]).is_err());
-        assert!(!activity.clearly_silent());
     }
 }
