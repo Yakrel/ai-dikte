@@ -57,6 +57,9 @@ jobs:
 
       - name: Install RPMs and smoke-test installed application
         run: |
+          # The minimal image ships tmpfiles without the full systemd package.
+          # Replace it explicitly before testing the application's real dependency.
+          dnf -y swap systemd-standalone-tmpfiles systemd
           dnf -y install ./dist/*.rpm
           cd /tmp
           runuser -u builder -- /usr/bin/ai-dikte --version
