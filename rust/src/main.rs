@@ -45,6 +45,10 @@ enum Command {
     ShortcutRemove,
     /// Record from microphone until Ctrl+C, then type text
     Record,
+    /// (Windows) Install/update executable to %LOCALAPPDATA%\Programs\AI-Dikte and repair PATH, startup & service
+    #[cfg(windows)]
+    #[command(alias = "install")]
+    Repair,
 }
 
 fn main() {
@@ -52,6 +56,15 @@ fn main() {
         eprintln!("AI Dikte: {error:#}");
         std::process::exit(1);
     }
+}
+
+// The daemon has no console, so its failures are only visible in the session log.
+fn run_daemon(daemon: impl FnOnce() -> Result<()>) -> Result<()> {
+    let result = ai_dikte::diagnostics::check_daemon().and_then(|()| daemon());
+    if let Err(error) = &result {
+        let _ = ai_dikte::diagnostics::append(&format!("Error: Daemon stopped: {error:#}"));
+    }
+    result
 }
 
 fn run() -> Result<()> {
@@ -115,14 +128,10 @@ fn run() -> Result<()> {
             Ok(())
         }
         #[cfg(windows)]
-        Command::Daemon => {
-            ai_dikte::diagnostics::check_configuration()?;
-            ai_dikte::windows::daemon()
-        }
+        Command::Daemon => run_daemon(ai_dikte::windows::daemon),
         #[cfg(not(windows))]
         Command::Daemon => {
-            ai_dikte::diagnostics::check_configuration()?;
-            tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::daemon())
+            run_daemon(|| tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::daemon()))
         }
         #[cfg(not(windows))]
         Command::Toggle => tokio::runtime::Runtime::new()?.block_on(ai_dikte::linux::toggle()),
@@ -134,6 +143,8 @@ fn run() -> Result<()> {
             println!("{}", ai_dikte::diagnostics::log()?);
             Ok(())
         }
+        #[cfg(windows)]
+        Command::Repair => ui::repair_installation(),
         Command::Record => tokio::runtime::Runtime::new()?.block_on(async {
             let config = Config::load(&config::path()?)?;
             let (stop, stopped) = tokio::sync::oneshot::channel();
