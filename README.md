@@ -99,7 +99,7 @@ ai-dikte
 
 ```text
 =====================================================
-                   AI DIKTE (v0.5.0)                    
+                   AI DIKTE (v0.6.0)                    
 =====================================================
  [Status]     : Background service is RUNNING
  [Hotkey]     : Win+Z (Press to talk, press to finish)

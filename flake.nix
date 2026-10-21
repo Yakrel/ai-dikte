@@ -57,7 +57,7 @@
       };
       mkAiDikte = desktop: typingBackend: pkgs.rustPlatform.buildRustPackage {
         pname = "ai-dikte-${desktop}";
-        version = "0.5.0";
+        version = "0.6.0";
         src = source;
         cargoRoot = "rust";
         buildAndTestSubdir = "rust";
