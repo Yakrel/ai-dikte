@@ -120,74 +120,79 @@ pub fn start(config: &Config) -> Result<Capture> {
     let (tx, audio) = mpsc::channel(BUFFER_CHUNKS);
     let (stop, mut stopping) = oneshot::channel();
     let selected = config.input_device.clone();
-    // WASAPI stream is created, owned and destroyed on the same dedicated thread.
+    // WASAPI stream is created, owned and destroyed on the same thread, and that
+    // thread is the process-lifetime audio thread (see `on_audio_thread`).
     let task = tokio::task::spawn_blocking(move || {
-        let device = select_device(selected.as_deref())?;
-        let supported = device.default_input_config()?;
-        let config: cpal::StreamConfig = supported.clone().into();
-        let rate = config.sample_rate.0;
-        let channels = config.channels as usize;
-        let failed = Arc::new(AtomicBool::new(false));
-        let overflow = failed.clone();
-        let device_failed = failed.clone();
-        let mut pcm = Pcm16::new(rate, channels)?;
-        let mut emit = move |samples: &[f32]| {
-            let bytes = pcm.convert(samples);
-            if try_send_audio(&tx, bytes).is_err() {
-                overflow.store(true, Ordering::Release);
+        on_audio_thread(move || -> Result<()> {
+            let device = select_device(selected.as_deref())?;
+            let supported = device.default_input_config()?;
+            let config: cpal::StreamConfig = supported.clone().into();
+            let rate = config.sample_rate.0;
+            let channels = config.channels as usize;
+            let failed = Arc::new(AtomicBool::new(false));
+            let overflow = failed.clone();
+            let device_failed = failed.clone();
+            let mut pcm = Pcm16::new(rate, channels)?;
+            let mut emit = move |samples: &[f32]| {
+                let bytes = pcm.convert(samples);
+                if try_send_audio(&tx, bytes).is_err() {
+                    overflow.store(true, Ordering::Release);
+                }
+            };
+            let on_error = move |_| {
+                device_failed.store(true, Ordering::Release);
+            };
+            let stream = match supported.sample_format() {
+                cpal::SampleFormat::F32 => device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _| emit(data),
+                    on_error,
+                    None,
+                )?,
+                cpal::SampleFormat::I16 => device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _| {
+                        emit(&data.iter().map(|v| *v as f32 / 32768.0).collect::<Vec<_>>())
+                    },
+                    on_error,
+                    None,
+                )?,
+                cpal::SampleFormat::U16 => device.build_input_stream(
+                    &config,
+                    move |data: &[u16], _| {
+                        emit(
+                            &data
+                                .iter()
+                                .map(|v| (*v as f32 - 32768.0) / 32768.0)
+                                .collect::<Vec<_>>(),
+                        )
+                    },
+                    on_error,
+                    None,
+                )?,
+                format => anyhow::bail!("Unsupported microphone sample format {format:?}"),
+            };
+            stream.play()?;
+            loop {
+                if failed.load(Ordering::Acquire) {
+                    anyhow::bail!(
+                        "Microphone failed or audio buffer overflowed; recording aborted"
+                    );
+                }
+                match stopping.try_recv() {
+                    Ok(()) | Err(oneshot::error::TryRecvError::Closed) => break,
+                    Err(oneshot::error::TryRecvError::Empty) => (),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
-        };
-        let on_error = move |_| {
-            device_failed.store(true, Ordering::Release);
-        };
-        let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config,
-                move |data: &[f32], _| emit(data),
-                on_error,
-                None,
-            )?,
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &config,
-                move |data: &[i16], _| {
-                    emit(&data.iter().map(|v| *v as f32 / 32768.0).collect::<Vec<_>>())
-                },
-                on_error,
-                None,
-            )?,
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                &config,
-                move |data: &[u16], _| {
-                    emit(
-                        &data
-                            .iter()
-                            .map(|v| (*v as f32 - 32768.0) / 32768.0)
-                            .collect::<Vec<_>>(),
-                    )
-                },
-                on_error,
-                None,
-            )?,
-            format => anyhow::bail!("Unsupported microphone sample format {format:?}"),
-        };
-        stream.play()?;
-        loop {
+            drop(stream);
+            // A final callback can fail between the loop's check and stream teardown.
+            // Only certify capture after callbacks have stopped and their errors are visible.
             if failed.load(Ordering::Acquire) {
                 anyhow::bail!("Microphone failed or audio buffer overflowed; recording aborted");
             }
-            match stopping.try_recv() {
-                Ok(()) | Err(oneshot::error::TryRecvError::Closed) => break,
-                Err(oneshot::error::TryRecvError::Empty) => (),
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        drop(stream);
-        // A final callback can fail between the loop's check and stream teardown.
-        // Only certify capture after callbacks have stopped and their errors are visible.
-        if failed.load(Ordering::Acquire) {
-            anyhow::bail!("Microphone failed or audio buffer overflowed; recording aborted");
-        }
-        Ok(())
+            Ok(())
+        })
     });
     Ok(Capture { audio, stop, task })
 }
@@ -230,6 +235,43 @@ impl Pcm16 {
             }
         }
         bytes
+    }
+}
+/// cpal keeps a process-global COM device enumerator created inside the COM
+/// apartment of whichever thread first touches it. Tokio blocking threads exit
+/// when idle, which tears that apartment down; the next device lookup from any
+/// thread then dies with STATUS_ACCESS_VIOLATION. All cpal use therefore runs
+/// on one thread that lives until process exit.
+#[cfg(windows)]
+fn on_audio_thread<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    use anyhow::Context;
+    use std::sync::{LazyLock, mpsc};
+    type Job = Box<dyn FnOnce() + Send>;
+    static THREAD: LazyLock<Option<mpsc::Sender<Job>>> = LazyLock::new(|| {
+        let (jobs, queue) = mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("audio".into())
+            .spawn(move || {
+                for job in queue {
+                    job();
+                }
+            })
+            .ok()
+            .map(|_| jobs)
+    });
+    let jobs = THREAD.as_ref().context("Cannot start audio thread")?;
+    let (done, outcome) = mpsc::channel();
+    jobs.send(Box::new(move || {
+        // A panic must not take the audio thread, and with it the COM apartment, down.
+        let _ = done.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)));
+    }))
+    .map_err(|_| anyhow::anyhow!("Audio thread stopped"))?;
+    match outcome.recv() {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => anyhow::bail!("Audio capture panicked"),
+        Err(_) => anyhow::bail!("Audio thread stopped"),
     }
 }
 #[cfg(windows)]
@@ -298,6 +340,22 @@ mod tests {
                     .iter()
                     .all(|b| i16::from_le_bytes([b[0], b[1]]) == 16384)
             );
+        }
+    }
+
+    // Dropping a runtime ends its blocking threads, as idling does in the daemon.
+    // Device lookup after that used to crash with STATUS_ACCESS_VIOLATION.
+    #[cfg(windows)]
+    #[test]
+    fn device_lookup_survives_blocking_threads_exiting() {
+        for _ in 0..3 {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            runtime.block_on(async {
+                let capture = start(&Config::default()).unwrap();
+                drop(capture.stop);
+                let _ = capture.task.await.unwrap();
+            });
+            drop(runtime);
         }
     }
 }
