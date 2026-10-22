@@ -63,6 +63,7 @@ AI Dikte is a minimal, fast, and local voice dictation utility powered by the Go
 - No silent fallback chains or heuristic guessing.
 - Unsupported desktop environments (e.g. non-Wayland on Linux) fail fast with clear diagnostic messages.
 - Typing backends are strictly locked: `SendInput` on Windows, `kwtype` on KDE Wayland, and `wtype` on Hyprland.
+- Transient hardware (microphone) is never a daemon startup requirement: the daemon stays alive, and each recording resolves the current default device and reports a missing one as an error. Daemon startup failures are written to `session.log` because the daemon has no console.
 ### H. Zero-Config First-Run Onboarding
 - When executed without an existing configuration, `ai-dikte` directly prompts for the Gemini API key.
 - The key is validated in real-time with a lightweight WebSocket handshake before saving. Invalid keys are never stored.
@@ -87,4 +88,5 @@ AI Dikte is a minimal, fast, and local voice dictation utility powered by the Go
 | `ai-dikte status` | Prints plain text status of the background service and configuration. |
 | `ai-dikte doctor` | Runs local environment, microphone, and live API connection diagnostics. |
 | `ai-dikte logs` | Prints the session log to terminal. |
+| `ai-dikte repair` / `ai-dikte install` | (Windows) Installs/updates the executable into `%LOCALAPPDATA%\Programs\AI-Dikte`, refreshes `bin\ai-dikte.cmd`, user `PATH`, sign-in startup, and restarts the daemon. Also exposed as menu option `[6]`. |
 | `ai-dikte --self-test` | Runs self-tests without credentials, microphone, or network access. |

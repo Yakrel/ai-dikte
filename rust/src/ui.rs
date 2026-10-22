@@ -507,8 +507,20 @@ pub fn menu() -> Result<()> {
             " [5] Background Service: [{}]",
             if running { "Stop" } else { "Start" }
         );
+        #[cfg(windows)]
+        {
+            let from_installed = crate::windows::is_running_from_installed_path().unwrap_or(false);
+            if from_installed {
+                println!(" [6] Repair Installation (Launcher, PATH, Startup & Service)");
+            } else {
+                println!(" [6] Install / Update to System (%LOCALAPPDATA%\\Programs\\AI-Dikte)");
+            }
+        }
         println!(" [0] Exit");
         println!("-----------------------------------------------------");
+        #[cfg(windows)]
+        print!(" Choice [0-6]: ");
+        #[cfg(not(windows))]
         print!(" Choice [0-5]: ");
         io::stdout().flush()?;
 
@@ -522,10 +534,15 @@ pub fn menu() -> Result<()> {
             "3" => update_style_and_vocabulary(&mut config, &path)?,
             "4" => toggle_autostart(autostart)?,
             "5" => toggle_daemon(running)?,
+            #[cfg(windows)]
+            "6" => repair_installation()?,
             "0" => {
                 println!("\n Exiting AI Dikte menu.");
                 break;
             }
+            #[cfg(windows)]
+            _ => println!(" [!] Invalid choice! Please enter a number between 0 and 6."),
+            #[cfg(not(windows))]
             _ => println!(" [!] Invalid choice! Please enter a number between 0 and 5."),
         }
     }
@@ -692,6 +709,24 @@ fn toggle_daemon(running: bool) -> Result<()> {
         background::start()?;
         println!("STARTED.");
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn repair_installation() -> Result<()> {
+    let from_installed = crate::windows::is_running_from_installed_path().unwrap_or(false);
+    if from_installed {
+        print!("\n -> Repairing installation, PATH, startup entry, and background service... ");
+    } else {
+        print!("\n -> Installing executable to system and starting background service... ");
+    }
+    io::stdout().flush()?;
+    let path = crate::windows::install_or_repair()?;
+    println!("DONE.");
+    println!(" [OK] Installed at: {}", path.display());
+    println!(
+        " [OK] Command launcher (`ai-dikte`), user PATH, sign-in startup, and background service are ready."
+    );
     Ok(())
 }
 

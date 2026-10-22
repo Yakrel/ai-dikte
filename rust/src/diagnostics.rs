@@ -62,13 +62,11 @@ pub fn log() -> Result<String> {
     }
 }
 
-pub fn check_configuration() -> Result<()> {
+/// Local state the daemon cannot recover from while running. Transient hardware
+/// such as the microphone is resolved per recording, so it is not checked here.
+fn checked_config() -> Result<crate::config::Config> {
     let config = crate::config::Config::load(&crate::config::path()?)?;
     config.key()?;
-    #[cfg(windows)]
-    {
-        crate::audio::select_device(config.input_device.as_deref())?;
-    }
     #[cfg(not(windows))]
     {
         if std::env::var_os("WAYLAND_DISPLAY").is_none() {
@@ -78,6 +76,17 @@ pub fn check_configuration() -> Result<()> {
             require_program(program)?;
         }
     }
+    Ok(config)
+}
+pub fn check_daemon() -> Result<()> {
+    checked_config().map(drop)
+}
+pub fn check_configuration() -> Result<()> {
+    let config = checked_config()?;
+    #[cfg(windows)]
+    crate::audio::select_device(config.input_device.as_deref())?;
+    #[cfg(not(windows))]
+    let _ = config;
     Ok(())
 }
 #[cfg(not(windows))]

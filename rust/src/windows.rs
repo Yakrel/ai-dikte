@@ -499,11 +499,52 @@ pub fn stop_daemon() -> Result<()> {
     }
 }
 
+fn installed_dir() -> Result<std::path::PathBuf> {
+    let root = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .context("LOCALAPPDATA is missing")?;
+    if !root.is_absolute() {
+        bail!("LOCALAPPDATA must be an absolute path");
+    }
+    Ok(root.join("Programs").join("AI-Dikte"))
+}
+
+pub fn installed_exe_path() -> Result<std::path::PathBuf> {
+    Ok(installed_dir()?.join("ai-dikte.exe"))
+}
+
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(b.to_string_lossy().trim_end_matches(['\\', '/'])),
+    }
+}
+
+pub fn is_running_from_installed_path() -> Result<bool> {
+    let current = std::env::current_exe()?;
+    let installed = installed_exe_path()?;
+    Ok(installed.exists() && same_path(&current, &installed))
+}
+
+/// Prefer the canonical installed binary whenever it exists on disk so running a
+/// downloaded copy never repoints sign-in startup or spawns the daemon from Downloads.
+fn preferred_daemon_exe() -> Result<std::path::PathBuf> {
+    let installed = installed_exe_path()?;
+    if installed.is_file() {
+        Ok(installed)
+    } else {
+        Ok(std::env::current_exe()?)
+    }
+}
+
 pub fn set_startup(enabled: bool) -> Result<()> {
     let startup_value = if enabled {
         Some(wide(&format!(
             "\"{}\" daemon",
-            std::env::current_exe()?.display()
+            preferred_daemon_exe()?.display()
         )))
     } else {
         None
@@ -593,7 +634,7 @@ pub fn ensure_background() -> Result<()> {
         None
     } else {
         Some(
-            std::process::Command::new(std::env::current_exe()?)
+            std::process::Command::new(preferred_daemon_exe()?)
                 .arg("daemon")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -662,6 +703,188 @@ fn error_display_text(message: &str) -> String {
         .nth(34)
         .map_or(detail.len(), |(index, _)| index);
     format!("Error: {}", &detail[..end])
+}
+
+fn merge_user_path(current: &str, preferred: &str, remove: &[&str]) -> String {
+    let mut parts = vec![preferred.to_string()];
+    for raw in current.split(';') {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let norm = trimmed.trim_end_matches(['\\', '/']);
+        let skip = std::iter::once(preferred)
+            .chain(remove.iter().copied())
+            .any(|candidate| norm.eq_ignore_ascii_case(candidate.trim_end_matches(['\\', '/'])));
+        if !skip {
+            parts.push(trimmed.to_string());
+        }
+    }
+    parts.join(";")
+}
+
+fn ensure_user_path(preferred: &std::path::Path, remove: &[&std::path::Path]) -> Result<()> {
+    let preferred_str = preferred
+        .to_str()
+        .context("Installation path is not valid UTF-8")?;
+    let remove_strs: Vec<&str> = remove.iter().filter_map(|p| p.to_str()).collect();
+    unsafe {
+        let mut key = null_mut();
+        let status = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            wide("Environment").as_ptr(),
+            0,
+            null(),
+            0,
+            KEY_QUERY_VALUE | KEY_SET_VALUE,
+            null(),
+            &mut key,
+            null_mut(),
+        );
+        if status != ERROR_SUCCESS {
+            bail!("Cannot open user Environment registry key ({status})");
+        }
+
+        let value_name = wide("Path");
+        let mut value_type: u32 = REG_EXPAND_SZ;
+        let mut bytes: u32 = 0;
+        let query = RegQueryValueExW(
+            key,
+            value_name.as_ptr(),
+            null_mut(),
+            &mut value_type,
+            null_mut(),
+            &mut bytes,
+        );
+        let current = if query == ERROR_FILE_NOT_FOUND {
+            value_type = REG_EXPAND_SZ;
+            String::new()
+        } else if query != ERROR_SUCCESS {
+            RegCloseKey(key);
+            bail!("Cannot read user PATH from registry ({query})");
+        } else {
+            let mut buf = vec![0u16; (bytes as usize / 2) + 1];
+            let mut read_bytes = (buf.len() * 2) as u32;
+            let query = RegQueryValueExW(
+                key,
+                value_name.as_ptr(),
+                null_mut(),
+                &mut value_type,
+                buf.as_mut_ptr().cast(),
+                &mut read_bytes,
+            );
+            if query != ERROR_SUCCESS {
+                RegCloseKey(key);
+                bail!("Cannot read user PATH buffer ({query})");
+            }
+            let len = (read_bytes as usize / 2).min(buf.len());
+            let slice = &buf[..len];
+            let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
+            String::from_utf16_lossy(&slice[..end])
+        };
+
+        let updated = merge_user_path(&current, preferred_str, &remove_strs);
+        let encoded = wide(&updated);
+        let reg_type = if value_type == REG_SZ {
+            REG_SZ
+        } else {
+            REG_EXPAND_SZ
+        };
+        let set = RegSetValueExW(
+            key,
+            value_name.as_ptr(),
+            0,
+            reg_type,
+            encoded.as_ptr().cast(),
+            (encoded.len() * 2) as u32,
+        );
+        RegCloseKey(key);
+        if set != ERROR_SUCCESS {
+            bail!("Cannot update user PATH in registry ({set})");
+        }
+
+        let env_wide = wide("Environment");
+        let mut _result: usize = 0;
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            env_wide.as_ptr() as LPARAM,
+            SMTO_ABORTIFHUNG,
+            1000,
+            &mut _result,
+        );
+    }
+    Ok(())
+}
+
+fn write_command_launcher(install_dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    let bin = install_dir.join("bin");
+    std::fs::create_dir_all(&bin).context("Cannot create bin launcher directory")?;
+    let launcher_path = bin.join("ai-dikte.cmd");
+    let contents = "@echo off\r\n\"%~dp0..\\ai-dikte.exe\" %*\r\nexit /b %errorlevel%\r\n";
+    std::fs::write(&launcher_path, contents).context("Cannot write ai-dikte.cmd launcher")?;
+    Ok(bin)
+}
+
+/// Installs the currently running executable into `%LOCALAPPDATA%\Programs\AI-Dikte`
+/// (if running from elsewhere) and repairs the CLI launcher, user PATH, sign-in
+/// startup entry, and background service.
+pub fn install_or_repair() -> Result<std::path::PathBuf> {
+    let install_dir = installed_dir()?;
+    let target_exe = install_dir.join("ai-dikte.exe");
+    let current_exe = std::env::current_exe().context("Cannot resolve current executable path")?;
+
+    if running()? {
+        let _ = stop_daemon();
+    }
+
+    std::fs::create_dir_all(&install_dir).context("Cannot create installation directory")?;
+
+    if !(target_exe.exists() && same_path(&current_exe, &target_exe)) {
+        let staged = install_dir.join("ai-dikte.exe.new");
+        std::fs::copy(&current_exe, &staged).with_context(|| {
+            format!(
+                "Cannot copy {} to {}",
+                current_exe.display(),
+                staged.display()
+            )
+        })?;
+        let mut last_err = None;
+        for _ in 0..20 {
+            match std::fs::rename(&staged, &target_exe) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            let _ = std::fs::remove_file(&staged);
+            return Err(err).with_context(|| {
+                format!(
+                    "Cannot replace {}; close any other running AI Dikte windows and retry",
+                    target_exe.display()
+                )
+            });
+        }
+    }
+
+    let bin_dir = write_command_launcher(&install_dir)?;
+    ensure_user_path(&bin_dir, &[install_dir.as_path()])?;
+    set_startup(true)?;
+
+    // Start the daemon only when configuration + API key are already present;
+    // otherwise the user is still pre-onboarding and `setup` will start it.
+    if crate::diagnostics::check_daemon().is_ok() {
+        ensure_background()?;
+    }
+
+    Ok(target_exe)
 }
 
 #[cfg(test)]
@@ -743,6 +966,19 @@ mod tests {
         assert_eq!(
             chord_event(&mut active, true, false, true, true),
             ChordAction::Pass
+        );
+    }
+
+    #[test]
+    fn user_path_merge_prepends_bin_and_removes_duplicates_case_insensitively() {
+        let merged = merge_user_path(
+            r"C:\Windows\System32;c:\users\u\appdata\local\programs\ai-dikte\bin\;C:\Users\u\AppData\Local\Programs\AI-Dikte;C:\Tools",
+            r"C:\Users\u\AppData\Local\Programs\AI-Dikte\bin",
+            &[r"C:\Users\u\AppData\Local\Programs\AI-Dikte"],
+        );
+        assert_eq!(
+            merged,
+            r"C:\Users\u\AppData\Local\Programs\AI-Dikte\bin;C:\Windows\System32;C:\Tools"
         );
     }
 }
